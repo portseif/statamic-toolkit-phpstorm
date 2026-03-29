@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.antlers.support</id>
     <name>Antlers Support</name>
-    <vendor url="https://github.com/portseif/antlers-support">portseif</vendor>
+    <vendor url="https://github.com/portseif/antlers-support">Chris Seifert</vendor>
 
     <description><![CDATA[
         <p>Syntax highlighting and editor support for the
@@ -17,6 +17,9 @@
             <li>Block commenting with <code>{{# #}}</code></li>
             <li>Recognition of all Antlers constructs: variables, tags, modifiers, conditionals, operators, comments, PHP regions</li>
         </ul>
+
+        <p><em>This plugin is not affiliated with, endorsed by, or officially connected to Statamic.
+        "Statamic" and the Statamic logo are trademarks of Wilderborn.</em></p>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>

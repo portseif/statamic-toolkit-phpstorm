@@ -71,6 +71,10 @@ This launches a sandboxed IDE instance with the plugin installed.
 - [ ] Formatting support
 - [ ] Structure view
 
+## Disclaimer
+
+This plugin is not affiliated with, endorsed by, or officially connected to Statamic. "Statamic" and the Statamic logo are trademarks of [Wilderborn](https://wilderborn.com).
+
 ## License
 
 MIT
