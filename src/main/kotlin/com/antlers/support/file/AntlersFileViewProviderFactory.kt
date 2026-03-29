@@ -1,0 +1,24 @@
+package com.antlers.support.file
+
+import com.intellij.lang.Language
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.FileViewProvider
+import com.intellij.psi.FileViewProviderFactory
+import com.intellij.psi.PsiManager
+import com.intellij.psi.templateLanguages.TemplateDataLanguageMappings
+import com.intellij.lang.html.HTMLLanguage
+
+class AntlersFileViewProviderFactory : FileViewProviderFactory {
+    override fun createFileViewProvider(
+        file: VirtualFile,
+        language: Language?,
+        manager: PsiManager,
+        eventSystemEnabled: Boolean
+    ): FileViewProvider {
+        val templateLang = TemplateDataLanguageMappings.getInstance(manager.project)
+            .getMapping(file)
+            ?: HTMLLanguage.INSTANCE
+
+        return AntlersFileViewProvider(manager, file, eventSystemEnabled, templateLang)
+    }
+}

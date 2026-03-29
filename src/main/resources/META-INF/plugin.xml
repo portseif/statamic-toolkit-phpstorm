@@ -1,0 +1,62 @@
+<idea-plugin>
+    <id>com.antlers.support</id>
+    <name>Antlers Support</name>
+    <vendor url="https://github.com/portseif/antlers-support">portseif</vendor>
+
+    <description><![CDATA[
+        <p>Syntax highlighting and editor support for the
+        <a href="https://statamic.dev/frontend/antlers">Antlers</a> template language
+        used by <a href="https://statamic.com">Statamic CMS</a>.</p>
+
+        <h3>Features</h3>
+        <ul>
+            <li>Syntax highlighting for <code>.antlers.html</code> and <code>.antlers.php</code> files</li>
+            <li>Full HTML/CSS/JS intelligence preserved within template files</li>
+            <li>Customizable color scheme (Settings &gt; Editor &gt; Color Scheme &gt; Antlers)</li>
+            <li>Brace matching for <code>{{ }}</code> delimiters</li>
+            <li>Block commenting with <code>{{# #}}</code></li>
+            <li>Recognition of all Antlers constructs: variables, tags, modifiers, conditionals, operators, comments, PHP regions</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- File Type -->
+        <fileType
+            name="Antlers"
+            implementationClass="com.antlers.support.AntlersFileType"
+            fieldName="INSTANCE"
+            language="Antlers"
+            patterns="*.antlers.html;*.antlers.php"/>
+
+        <!-- FileViewProvider (template language integration) -->
+        <fileType.fileViewProviderFactory
+            filetype="Antlers"
+            implementationClass="com.antlers.support.file.AntlersFileViewProviderFactory"/>
+
+        <!-- Parser -->
+        <lang.parserDefinition
+            language="Antlers"
+            implementationClass="com.antlers.support.parser.AntlersParserDefinition"/>
+
+        <!-- Syntax Highlighting -->
+        <lang.syntaxHighlighterFactory
+            language="Antlers"
+            implementationClass="com.antlers.support.highlighting.AntlersSyntaxHighlighterFactory"/>
+
+        <colorSettingsPage
+            implementation="com.antlers.support.highlighting.AntlersColorSettingsPage"/>
+
+        <!-- Brace Matching -->
+        <lang.braceMatcher
+            language="Antlers"
+            implementationClass="com.antlers.support.editor.AntlersBraceMatcher"/>
+
+        <!-- Commenter -->
+        <lang.commenter
+            language="Antlers"
+            implementationClass="com.antlers.support.editor.AntlersCommenter"/>
+    </extensions>
+</idea-plugin>
