@@ -14,6 +14,7 @@ import com.antlers.support.AntlersLanguage
 import com.antlers.support.file.AntlersFile
 import com.antlers.support.lexer.AntlersLexerAdapter
 import com.antlers.support.lexer.AntlersTokenSets
+import com.antlers.support.psi.AntlersTypes
 
 class AntlersParserDefinition : ParserDefinition {
     companion object {
@@ -32,7 +33,7 @@ class AntlersParserDefinition : ParserDefinition {
     override fun getStringLiteralElements(): TokenSet = AntlersTokenSets.STRINGS
 
     override fun createElement(node: ASTNode): PsiElement {
-        throw UnsupportedOperationException("Not yet implemented: ${node.elementType}")
+        return AntlersTypes.Factory.createElement(node)
     }
 
     override fun createFile(viewProvider: FileViewProvider): PsiFile = AntlersFile(viewProvider)

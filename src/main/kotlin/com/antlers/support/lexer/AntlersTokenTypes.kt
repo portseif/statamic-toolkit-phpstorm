@@ -8,6 +8,15 @@ class AntlersTokenType(debugName: String) : IElementType(debugName, AntlersLangu
 }
 
 object AntlersTokenTypes {
+    @JvmStatic
+    fun factory(name: String): IElementType {
+        return try {
+            AntlersTokenTypes::class.java.getField(name).get(null) as IElementType
+        } catch (e: NoSuchFieldException) {
+            AntlersTokenType(name)
+        }
+    }
+
     // Delimiters
     @JvmField val ANTLERS_OPEN = AntlersTokenType("ANTLERS_OPEN")           // {{
     @JvmField val ANTLERS_CLOSE = AntlersTokenType("ANTLERS_CLOSE")         // }}
