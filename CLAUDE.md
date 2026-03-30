@@ -15,7 +15,9 @@ Grammar-Kit code generation (lexer from `.flex`, parser from `.bnf`) runs automa
 
 ## Architecture
 
-This is a **JetBrains IDE plugin** for the [Antlers](https://statamic.dev/frontend/antlers) template language (Statamic CMS). It provides syntax highlighting, code completion, and editor features for `.antlers.html` and `.antlers.php` files, and the current development target is **PhpStorm** (`platformType=PS` in `gradle.properties`).
+**Statamic Toolkit** is a JetBrains IDE plugin for the [Antlers](https://statamic.dev/frontend/antlers) template language (Statamic CMS). It provides syntax highlighting, code completion, and editor features for `.antlers.html` and `.antlers.php` files, and the current development target is **PhpStorm** (`platformType=PS` in `gradle.properties`).
+
+The plugin name is **Statamic Toolkit** (marketplace display name), but the language is **Antlers**. All language-level registrations (file type, parser, highlighter, code style) use "Antlers". Only the plugin name and settings panel use "Statamic Toolkit".
 
 ### Dual PSI Tree (Template Language Framework)
 

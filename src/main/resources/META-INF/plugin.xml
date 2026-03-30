@@ -1,6 +1,6 @@
 <idea-plugin>
     <id>com.antlers.support</id>
-    <name>Antlers</name>
+    <name>Statamic Toolkit</name>
     <vendor url="https://github.com/portseif/antlers-support" email="chris@portseif.io">Chris Seifert</vendor>
 
     <description><![CDATA[
@@ -138,7 +138,7 @@
             parentId="language"
             instance="com.antlers.support.settings.AntlersSettingsConfigurable"
             id="com.antlers.support.settings"
-            displayName="Antlers"/>
+            displayName="Statamic Toolkit"/>
 
         <applicationService
             serviceImplementation="com.antlers.support.settings.AntlersSettings"/>

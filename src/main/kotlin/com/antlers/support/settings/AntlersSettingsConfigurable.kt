@@ -20,7 +20,7 @@ class AntlersSettingsConfigurable : Configurable {
     private var phpInjection: JBCheckBox? = null
     private var semanticHighlighting: JBCheckBox? = null
 
-    override fun getDisplayName(): String = "Antlers"
+    override fun getDisplayName(): String = "Statamic Toolkit"
 
     override fun createComponent(): JComponent {
         autoCloseDelimiters = JBCheckBox("Auto-close {{ }} delimiters")
