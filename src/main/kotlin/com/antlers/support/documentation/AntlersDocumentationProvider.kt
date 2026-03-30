@@ -5,6 +5,7 @@ import com.antlers.support.lexer.AntlersTokenTypes
 import com.antlers.support.psi.AntlersModifier
 import com.antlers.support.psi.AntlersTagExpression
 import com.antlers.support.psi.AntlersTagName
+import com.antlers.support.settings.AntlersSettings
 import com.antlers.support.statamic.StatamicCatalog
 import com.antlers.support.statamic.StatamicDocItem
 import com.intellij.lang.documentation.AbstractDocumentationProvider
@@ -43,11 +44,13 @@ class AntlersDocumentationProvider : AbstractDocumentationProvider() {
     }
 
     override fun generateDoc(element: PsiElement?, originalElement: PsiElement?): String? {
+        if (!AntlersSettings.getInstance().state.enableHoverDocumentation) return null
         val resolved = resolveDocItem(element) ?: resolveDocItem(originalElement) ?: return null
         return renderDoc(resolved.item, resolved.kind)
     }
 
     override fun generateHoverDoc(element: PsiElement, originalElement: PsiElement?): String? {
+        if (!AntlersSettings.getInstance().state.enableHoverDocumentation) return null
         return generateDoc(element, originalElement)
     }
 

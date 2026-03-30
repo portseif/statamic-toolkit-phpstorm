@@ -75,6 +75,7 @@ dependencies {
         )
         bundledPlugin("com.intellij.css")
         bundledPlugin("JavaScript")
+        bundledPlugin("com.jetbrains.php")
 
         pluginVerifier()
         zipSigner()

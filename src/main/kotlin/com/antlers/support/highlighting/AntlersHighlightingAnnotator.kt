@@ -6,6 +6,7 @@ import com.antlers.support.psi.AntlersModifier
 import com.antlers.support.psi.AntlersParameter
 import com.antlers.support.psi.AntlersTagExpression
 import com.antlers.support.psi.AntlersTagName
+import com.antlers.support.settings.AntlersSettings
 import com.intellij.lang.annotation.AnnotationHolder
 import com.intellij.lang.annotation.Annotator
 import com.intellij.lang.annotation.HighlightSeverity
@@ -13,6 +14,7 @@ import com.intellij.psi.PsiElement
 
 class AntlersHighlightingAnnotator : Annotator {
     override fun annotate(element: PsiElement, holder: AnnotationHolder) {
+        if (!AntlersSettings.getInstance().state.enableSemanticHighlighting) return
         when (val parent = element.parent) {
             is AntlersTagName -> {
                 if (shouldHighlightTagHead(element, parent)) {

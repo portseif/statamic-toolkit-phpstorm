@@ -15,7 +15,11 @@ class AntlersSettings : PersistentStateComponent<AntlersSettings.State> {
         var enableTagCompletion: Boolean = true,
         var enableModifierCompletion: Boolean = true,
         var enableVariableCompletion: Boolean = true,
-        var enablePartialNavigation: Boolean = true
+        var enablePartialNavigation: Boolean = true,
+        var enableHoverDocumentation: Boolean = true,
+        var enableAlpineJsInjection: Boolean = true,
+        var enablePhpInjection: Boolean = true,
+        var enableSemanticHighlighting: Boolean = true
     )
 
     private var myState = State()

@@ -1,4 +1,4 @@
-# Antlers Support
+# Antlers
 
 A JetBrains IDE plugin providing syntax highlighting and editor support for the [Antlers](https://statamic.dev/frontend/antlers) template language used by [Statamic CMS](https://statamic.com).
 
@@ -13,6 +13,7 @@ A JetBrains IDE plugin providing syntax highlighting and editor support for the 
 - **HTML Intelligence Preserved** -- full HTML/CSS/JS support within template files via IntelliJ's Template Language framework
 - **Code Completion** -- Statamic tags, modifiers, and variables with descriptions from the official docs
 - **Hover Documentation** -- quick docs with examples and links to statamic.dev
+- **PHP Intelligence** -- full PHP support inside `{{? ?}}` and `{{$ $}}` blocks with highlighting, completion, and formatting from your PhpStorm settings
 - **Alpine.js Support** -- JavaScript intelligence inside Alpine attributes (`x-data`, `@click`, `x-bind`, etc.) with method navigation back to `x-data`
 - **Partial Navigation** -- Cmd-click on `partial:name` to jump to the partial file
 - **Structure View** -- outline of Antlers tags in the Structure tool window
@@ -78,8 +79,10 @@ This launches a sandboxed IDE instance with the plugin installed.
 - [x] Formatting support
 - [x] Structure view
 - [x] Alpine.js support
+- [x] PHP intelligence in PHP blocks
 - [x] Hover documentation
 - [x] Statamic generators (controllers, tags, modifiers)
+- [x] Configurable settings panel
 - [ ] Code folding for tag pairs
 - [ ] Live templates / snippets
 

@@ -35,6 +35,7 @@
     <depends>com.intellij.modules.xml</depends>
     <depends>com.intellij.css</depends>
     <depends>JavaScript</depends>
+    <depends optional="true" config-file="antlers-php.xml">com.jetbrains.php</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- File Type -->

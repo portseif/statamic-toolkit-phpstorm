@@ -1,6 +1,7 @@
 package com.antlers.support.injection
 
 import com.antlers.support.AntlersLanguage
+import com.antlers.support.settings.AntlersSettings
 import com.intellij.lang.Language
 import com.intellij.lang.injection.MultiHostInjector
 import com.intellij.lang.injection.MultiHostRegistrar
@@ -13,6 +14,8 @@ import com.intellij.psi.xml.XmlAttributeValue
 class AntlersAlpineAttributeInjector : MultiHostInjector {
 
     override fun getLanguagesToInject(registrar: MultiHostRegistrar, context: PsiElement) {
+        if (!AntlersSettings.getInstance().state.enableAlpineJsInjection) return
+
         val host = context as? XmlAttributeValue ?: return
         val attribute = host.parent as? XmlAttribute ?: return
         val spec = injectionSpec(attribute.name) ?: return

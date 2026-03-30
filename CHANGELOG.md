@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.0]
+- PHP intelligence inside `{{? ?}}` and `{{$ $}}` blocks with syntax highlighting, completion, and formatting from your PhpStorm settings.
+- New settings panel with organized sections: Editor, Completion, Navigation & Documentation, and Language Injection.
+- Toggles for hover documentation, Alpine.js injection, PHP injection, and semantic highlighting.
+
 ## [0.3.0]
 - Statamic tag, modifier, and variable completion with hover documentation from the official docs.
 - Tools > Statamic menu with controller, tag, and modifier generators plus content query snippets.

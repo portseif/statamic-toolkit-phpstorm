@@ -1,6 +1,7 @@
 package com.antlers.support.settings
 
 import com.intellij.openapi.options.Configurable
+import com.intellij.ui.TitledSeparator
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.util.ui.FormBuilder
 import javax.swing.JComponent
@@ -14,6 +15,10 @@ class AntlersSettingsConfigurable : Configurable {
     private var modifierCompletion: JBCheckBox? = null
     private var variableCompletion: JBCheckBox? = null
     private var partialNavigation: JBCheckBox? = null
+    private var hoverDocumentation: JBCheckBox? = null
+    private var alpineJsInjection: JBCheckBox? = null
+    private var phpInjection: JBCheckBox? = null
+    private var semanticHighlighting: JBCheckBox? = null
 
     override fun getDisplayName(): String = "Antlers"
 
@@ -24,17 +29,26 @@ class AntlersSettingsConfigurable : Configurable {
         modifierCompletion = JBCheckBox("Modifier completion (after |)")
         variableCompletion = JBCheckBox("Variable completion")
         partialNavigation = JBCheckBox("Cmd+click navigation to partials")
+        hoverDocumentation = JBCheckBox("Show Statamic documentation on hover")
+        alpineJsInjection = JBCheckBox("Alpine.js intelligence in Antlers templates")
+        phpInjection = JBCheckBox("PHP intelligence in {{? ?}} and {{$ $}} blocks")
+        semanticHighlighting = JBCheckBox("Semantic highlighting for tag names and parameters")
 
         panel = FormBuilder.createFormBuilder()
-            .addSeparator()
+            .addComponent(TitledSeparator("Editor"))
             .addComponent(autoCloseDelimiters!!)
             .addComponent(autoCloseQuotes!!)
-            .addSeparator()
+            .addComponent(semanticHighlighting!!)
+            .addComponent(TitledSeparator("Completion"))
             .addComponent(tagCompletion!!)
             .addComponent(modifierCompletion!!)
             .addComponent(variableCompletion!!)
-            .addSeparator()
+            .addComponent(TitledSeparator("Navigation & Documentation"))
             .addComponent(partialNavigation!!)
+            .addComponent(hoverDocumentation!!)
+            .addComponent(TitledSeparator("Language Injection"))
+            .addComponent(phpInjection!!)
+            .addComponent(alpineJsInjection!!)
             .addComponentFillVertically(JPanel(), 0)
             .panel
 
@@ -49,6 +63,10 @@ class AntlersSettingsConfigurable : Configurable {
             || modifierCompletion?.isSelected != settings.enableModifierCompletion
             || variableCompletion?.isSelected != settings.enableVariableCompletion
             || partialNavigation?.isSelected != settings.enablePartialNavigation
+            || hoverDocumentation?.isSelected != settings.enableHoverDocumentation
+            || alpineJsInjection?.isSelected != settings.enableAlpineJsInjection
+            || phpInjection?.isSelected != settings.enablePhpInjection
+            || semanticHighlighting?.isSelected != settings.enableSemanticHighlighting
     }
 
     override fun apply() {
@@ -59,6 +77,10 @@ class AntlersSettingsConfigurable : Configurable {
         settings.enableModifierCompletion = modifierCompletion?.isSelected ?: true
         settings.enableVariableCompletion = variableCompletion?.isSelected ?: true
         settings.enablePartialNavigation = partialNavigation?.isSelected ?: true
+        settings.enableHoverDocumentation = hoverDocumentation?.isSelected ?: true
+        settings.enableAlpineJsInjection = alpineJsInjection?.isSelected ?: true
+        settings.enablePhpInjection = phpInjection?.isSelected ?: true
+        settings.enableSemanticHighlighting = semanticHighlighting?.isSelected ?: true
     }
 
     override fun reset() {
@@ -69,5 +91,9 @@ class AntlersSettingsConfigurable : Configurable {
         modifierCompletion?.isSelected = settings.enableModifierCompletion
         variableCompletion?.isSelected = settings.enableVariableCompletion
         partialNavigation?.isSelected = settings.enablePartialNavigation
+        hoverDocumentation?.isSelected = settings.enableHoverDocumentation
+        alpineJsInjection?.isSelected = settings.enableAlpineJsInjection
+        phpInjection?.isSelected = settings.enablePhpInjection
+        semanticHighlighting?.isSelected = settings.enableSemanticHighlighting
     }
 }

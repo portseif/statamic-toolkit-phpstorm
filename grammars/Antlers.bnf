@@ -142,9 +142,17 @@ escapedNode ::= ESCAPED_CONTENT
 
 comment ::= COMMENT_OPEN COMMENT_CONTENT * COMMENT_CLOSE {pin=1}
 
-phpRawBlock ::= PHP_RAW_OPEN PHP_RAW_CONTENT * PHP_RAW_CLOSE {pin=1}
+phpRawBlock ::= PHP_RAW_OPEN PHP_RAW_CONTENT * PHP_RAW_CLOSE {
+    pin=1
+    mixin="com.antlers.support.psi.impl.AntlersPhpBlockMixin"
+    implements="com.intellij.psi.PsiLanguageInjectionHost"
+}
 
-phpEchoBlock ::= PHP_ECHO_OPEN PHP_ECHO_CONTENT * PHP_ECHO_CLOSE {pin=1}
+phpEchoBlock ::= PHP_ECHO_OPEN PHP_ECHO_CONTENT * PHP_ECHO_CLOSE {
+    pin=1
+    mixin="com.antlers.support.psi.impl.AntlersPhpBlockMixin"
+    implements="com.intellij.psi.PsiLanguageInjectionHost"
+}
 
 // Special: {{ noparse }}...{{ /noparse }}
 // The lexer consumes }} after noparse as NOPARSE_CONTENT,
