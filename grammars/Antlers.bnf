@@ -1,0 +1,239 @@
+{
+  parserClass="com.antlers.support.parser.AntlersParser"
+  extends="com.intellij.extapi.psi.ASTWrapperPsiElement"
+
+  psiClassPrefix="Antlers"
+  psiImplClassSuffix="Impl"
+  psiPackage="com.antlers.support.psi"
+  psiImplPackage="com.antlers.support.psi.impl"
+
+  elementTypeHolderClass="com.antlers.support.psi.AntlersTypes"
+  elementTypeClass="com.antlers.support.parser.AntlersElementType"
+  tokenTypeFactory="com.antlers.support.lexer.AntlersTokenTypes.factory"
+
+  parserUtilClass="com.antlers.support.parser.AntlersParserUtil"
+
+  // Token names only — no string values.
+  // The tokenTypeFactory resolves each name to the existing instance
+  // in AntlersTokenTypes via reflection.
+  tokens = [
+    ANTLERS_OPEN
+    ANTLERS_CLOSE
+    TAG_SELF_CLOSE
+    COMMENT_OPEN
+    COMMENT_CLOSE
+    PHP_RAW_OPEN
+    PHP_RAW_CLOSE
+    PHP_ECHO_OPEN
+    PHP_ECHO_CLOSE
+
+    TEMPLATE_TEXT
+    COMMENT_CONTENT
+    PHP_RAW_CONTENT
+    PHP_ECHO_CONTENT
+    NOPARSE_CONTENT
+    ESCAPED_CONTENT
+
+    KEYWORD_IF
+    KEYWORD_ELSEIF
+    KEYWORD_ELSE
+    KEYWORD_ENDIF
+    KEYWORD_UNLESS
+    KEYWORD_ENDUNLESS
+    KEYWORD_SWITCH
+    KEYWORD_NOPARSE
+    KEYWORD_ONCE
+    KEYWORD_TRUE
+    KEYWORD_FALSE
+    KEYWORD_NULL
+    KEYWORD_VOID
+    KEYWORD_AS
+    KEYWORD_AND
+    KEYWORD_OR
+    KEYWORD_XOR
+    KEYWORD_NOT
+    KEYWORD_WHERE
+    KEYWORD_ORDERBY
+    KEYWORD_GROUPBY
+    KEYWORD_MERGE
+    KEYWORD_TAKE
+    KEYWORD_SKIP
+    KEYWORD_PLUCK
+
+    IDENTIFIER
+    STRING_DQ
+    STRING_SQ
+    NUMBER_INT
+    NUMBER_FLOAT
+
+    OP_IDENTICAL
+    OP_NOT_IDENTICAL
+    OP_SPACESHIP
+    OP_EQUALS
+    OP_NOT_EQUALS
+    OP_GREATER_EQUAL
+    OP_LESS_EQUAL
+    OP_GREATER
+    OP_LESS
+    OP_AND
+    OP_OR
+    OP_NOT
+    OP_NULL_COALESCE
+    OP_GATEKEEPER
+    OP_TERNARY_QUESTION
+    OP_POWER
+    OP_PLUS_ASSIGN
+    OP_MINUS_ASSIGN
+    OP_MULTIPLY_ASSIGN
+    OP_DIVIDE_ASSIGN
+    OP_MODULO_ASSIGN
+    OP_ASSIGN
+    OP_PLUS
+    OP_MINUS
+    OP_MULTIPLY
+    OP_DIVIDE
+    OP_MODULO
+    OP_PIPE
+    OP_ARROW
+    OP_RANGE
+
+    DOT
+    COLON
+    SEMICOLON
+    COMMA
+    LPAREN
+    RPAREN
+    LBRACKET
+    RBRACKET
+    SLASH
+    DOLLAR
+    AT
+  ]
+}
+
+// ===========================================================================
+// Root rule
+// ===========================================================================
+
+antlersFile ::= item *
+
+private item ::= noparseBlock
+    | antlersTag
+    | comment
+    | phpRawBlock
+    | phpEchoBlock
+    | escapedNode
+    | templateContent
+    {recoverWhile=itemRecover}
+
+private itemRecover ::= !(ANTLERS_OPEN | COMMENT_OPEN | PHP_RAW_OPEN | PHP_ECHO_OPEN
+    | TEMPLATE_TEXT | ESCAPED_CONTENT | NOPARSE_CONTENT)
+
+// ===========================================================================
+// Leaf content nodes
+// ===========================================================================
+
+templateContent ::= TEMPLATE_TEXT
+escapedNode ::= ESCAPED_CONTENT
+
+// ===========================================================================
+// Block constructs
+// ===========================================================================
+
+comment ::= COMMENT_OPEN COMMENT_CONTENT * COMMENT_CLOSE {pin=1}
+
+phpRawBlock ::= PHP_RAW_OPEN PHP_RAW_CONTENT * PHP_RAW_CLOSE {pin=1}
+
+phpEchoBlock ::= PHP_ECHO_OPEN PHP_ECHO_CONTENT * PHP_ECHO_CLOSE {pin=1}
+
+// Special: {{ noparse }}...{{ /noparse }}
+// The lexer consumes }} after noparse as NOPARSE_CONTENT,
+// and {{ /noparse }} as a single ANTLERS_CLOSE token.
+noparseBlock ::= ANTLERS_OPEN KEYWORD_NOPARSE NOPARSE_CONTENT * ANTLERS_CLOSE {pin=2}
+
+// ===========================================================================
+// Antlers tag: {{ ... }} or {{ ... /}}
+// ===========================================================================
+
+antlersTag ::= ANTLERS_OPEN tagBody (ANTLERS_CLOSE | TAG_SELF_CLOSE) {
+    pin=1
+    recoverWhile=tagRecover
+}
+private tagRecover ::= !(ANTLERS_OPEN | ANTLERS_CLOSE | TAG_SELF_CLOSE
+    | COMMENT_OPEN | PHP_RAW_OPEN | PHP_ECHO_OPEN
+    | TEMPLATE_TEXT | ESCAPED_CONTENT | NOPARSE_CONTENT)
+
+// Dispatch inside {{ ... }}
+private tagBody ::= closingTag | conditionalTag | tagExpression ?
+
+// ===========================================================================
+// Closing tag: {{ /collection:blog }}
+// ===========================================================================
+
+closingTag ::= OP_DIVIDE tagName {pin=1}
+
+// ===========================================================================
+// Conditional tags
+// ===========================================================================
+
+conditionalTag ::= conditionalKeywordWithExpr tagToken *
+    | standaloneKeyword
+
+private conditionalKeywordWithExpr ::= KEYWORD_IF | KEYWORD_ELSEIF | KEYWORD_UNLESS | KEYWORD_SWITCH
+private standaloneKeyword ::= KEYWORD_ELSE | KEYWORD_ENDIF | KEYWORD_ENDUNLESS | KEYWORD_ONCE
+
+private tagBodyRecover ::= !(ANTLERS_CLOSE | TAG_SELF_CLOSE)
+
+// ===========================================================================
+// Tag expression: tagName followed by modifiers, parameters, and tokens
+// ===========================================================================
+
+tagExpression ::= tagName tagSuffix * {recoverWhile=tagBodyRecover}
+
+private tagSuffix ::= modifier | parameter | tagToken
+
+// ===========================================================================
+// Tag name: collection:blog or partial:nav/header
+// ===========================================================================
+
+tagName ::= IDENTIFIER (COLON IDENTIFIER) * (OP_DIVIDE IDENTIFIER) *
+
+// ===========================================================================
+// Parameter: limit="5" or as="posts"
+// ===========================================================================
+
+parameter ::= parameterName OP_ASSIGN parameterValue {pin=2}
+private parameterName ::= IDENTIFIER | KEYWORD_AS | KEYWORD_WHERE | KEYWORD_ORDERBY
+    | KEYWORD_GROUPBY | KEYWORD_TAKE | KEYWORD_SKIP
+private parameterValue ::= STRING_DQ | STRING_SQ | IDENTIFIER | NUMBER_INT | NUMBER_FLOAT
+    | KEYWORD_TRUE | KEYWORD_FALSE
+
+// ===========================================================================
+// Modifier: | upper or | truncate:100
+// ===========================================================================
+
+modifier ::= OP_PIPE IDENTIFIER modifierArgs ? {pin=1}
+modifierArgs ::= COLON modifierArg ((COLON | COMMA) modifierArg) *
+modifierArg ::= STRING_DQ | STRING_SQ | NUMBER_INT | NUMBER_FLOAT
+    | KEYWORD_TRUE | KEYWORD_FALSE | KEYWORD_NULL
+    | IDENTIFIER (DOT IDENTIFIER) *
+
+// ===========================================================================
+// Catch-all: any token inside {{ }} not handled above
+// ===========================================================================
+
+private tagToken ::= IDENTIFIER | STRING_DQ | STRING_SQ | NUMBER_INT | NUMBER_FLOAT
+    | KEYWORD_TRUE | KEYWORD_FALSE | KEYWORD_NULL | KEYWORD_VOID
+    | KEYWORD_AND | KEYWORD_OR | KEYWORD_XOR | KEYWORD_NOT | KEYWORD_AS
+    | KEYWORD_WHERE | KEYWORD_ORDERBY | KEYWORD_GROUPBY | KEYWORD_MERGE
+    | KEYWORD_TAKE | KEYWORD_SKIP | KEYWORD_PLUCK | KEYWORD_NOPARSE
+    | OP_ASSIGN | OP_PLUS | OP_MINUS | OP_MULTIPLY | OP_DIVIDE | OP_MODULO
+    | OP_EQUALS | OP_NOT_EQUALS | OP_IDENTICAL | OP_NOT_IDENTICAL
+    | OP_GREATER | OP_LESS | OP_GREATER_EQUAL | OP_LESS_EQUAL | OP_SPACESHIP
+    | OP_AND | OP_OR | OP_NOT | OP_NULL_COALESCE | OP_GATEKEEPER
+    | OP_TERNARY_QUESTION | OP_POWER | OP_ARROW | OP_RANGE
+    | OP_PLUS_ASSIGN | OP_MINUS_ASSIGN | OP_MULTIPLY_ASSIGN | OP_DIVIDE_ASSIGN | OP_MODULO_ASSIGN
+    | OP_PIPE
+    | DOT | COLON | SEMICOLON | COMMA
+    | LPAREN | RPAREN | LBRACKET | RBRACKET
+    | SLASH | DOLLAR | AT
