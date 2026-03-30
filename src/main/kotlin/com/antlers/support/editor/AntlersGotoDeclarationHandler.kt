@@ -1,15 +1,22 @@
 package com.antlers.support.editor
 
 import com.intellij.codeInsight.navigation.actions.GotoDeclarationHandler
+import com.intellij.lang.injection.InjectedLanguageManager
+import com.intellij.lang.javascript.psi.JSReferenceExpression
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiManager
 import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.util.PsiTreeUtil
 import com.antlers.support.AntlersLanguage
+import com.antlers.support.injection.AntlersAlpineReferenceResolver
 import com.antlers.support.lexer.AntlersTokenTypes
+import com.antlers.support.partials.AntlersPartialPaths
+import com.antlers.support.settings.AntlersSettings
 
 class AntlersGotoDeclarationHandler : GotoDeclarationHandler {
     override fun getGotoDeclarationTargets(
@@ -18,34 +25,87 @@ class AntlersGotoDeclarationHandler : GotoDeclarationHandler {
         editor: Editor
     ): Array<PsiElement>? {
         if (sourceElement == null) return null
-        if (sourceElement.language != AntlersLanguage.INSTANCE) return null
 
-        val partialPath = resolvePartialPath(sourceElement) ?: return null
-        val targets = findPartialFiles(sourceElement.project, partialPath)
+        resolveAlpineTarget(sourceElement, offset)?.let { return arrayOf(it) }
+
+        val virtualFile = antlersVirtualFile(sourceElement) ?: return null
+        if (!virtualFile.name.contains(".antlers.")) return null
+
+        if (!AntlersSettings.getInstance().state.enablePartialNavigation) return null
+
+        val project = sourceElement.project
+
+        // Get the element from the Antlers PSI tree explicitly,
+        // since the platform may give us an element from the HTML tree
+        val viewProvider = InjectedLanguageManager.getInstance(project)
+            .getTopLevelFile(sourceElement)
+            .viewProvider
+        val antlersFile = viewProvider.getPsi(AntlersLanguage.INSTANCE) ?: return null
+        val antlersElement = antlersFile.findElementAt(offset) ?: return null
+
+        val partialPath = resolvePartialPath(antlersElement) ?: return null
+        val targets = findPartialFiles(project, partialPath)
         return if (targets.isNotEmpty()) targets.toTypedArray() else null
+    }
+
+    private fun resolveAlpineTarget(sourceElement: PsiElement, offset: Int): PsiElement? {
+        val injectedLanguageManager = InjectedLanguageManager.getInstance(sourceElement.project)
+        val topLevelFile = injectedLanguageManager.getTopLevelFile(sourceElement)
+        if (topLevelFile.viewProvider.baseLanguage != AntlersLanguage.INSTANCE) return null
+
+        val injectedElement = alpineInjectedElementAt(
+            sourceElement,
+            topLevelFile,
+            offset,
+            injectedLanguageManager
+        ) ?: return null
+
+        val reference = PsiTreeUtil.getParentOfType(
+            injectedElement,
+            JSReferenceExpression::class.java,
+            false
+        ) ?: return null
+
+        return AntlersAlpineReferenceResolver.resolve(reference)
+    }
+
+    private fun alpineInjectedElementAt(
+        sourceElement: PsiElement,
+        topLevelFile: PsiFile,
+        offset: Int,
+        injectedLanguageManager: InjectedLanguageManager
+    ): PsiElement? {
+        if (injectedLanguageManager.isInjectedFragment(sourceElement.containingFile)) {
+            return sourceElement
+        }
+
+        val viewProvider = topLevelFile.viewProvider
+        val templateLanguage = viewProvider.languages.firstOrNull { it != viewProvider.baseLanguage } ?: return null
+        val templateDataFile = viewProvider.getPsi(templateLanguage)
+
+        return templateDataFile?.let { injectedLanguageManager.findInjectedElementAt(it, offset) }
+            ?: injectedLanguageManager.findInjectedElementAt(topLevelFile, offset)
+    }
+
+    private fun antlersVirtualFile(sourceElement: PsiElement): VirtualFile? {
+        val injectedLanguageManager = InjectedLanguageManager.getInstance(sourceElement.project)
+        return injectedLanguageManager.getTopLevelFile(sourceElement).virtualFile
+            ?: sourceElement.containingFile?.virtualFile
     }
 
     private fun resolvePartialPath(element: PsiElement): String? {
         val elementType = element.node?.elementType ?: return null
 
-        // Only handle identifiers and colons within Antlers expressions
         if (elementType != AntlersTokenTypes.IDENTIFIER &&
             elementType != AntlersTokenTypes.COLON &&
             elementType != AntlersTokenTypes.OP_DIVIDE
         ) return null
 
-        // Walk backwards/forwards to collect the full tag expression: partial:path/to/file
-        val parent = element.parent ?: return null
-        val children = parent.children
-        if (children.isEmpty()) {
-            // Flat token structure — walk siblings instead
-            return resolveFromSiblings(element)
-        }
-        return null
+        return resolveFromSiblings(element)
     }
 
     private fun resolveFromSiblings(element: PsiElement): String? {
-        // Find the start of the tag expression by walking backwards
+        // Walk backwards to find the start of the tag expression
         var current: PsiElement? = element
         while (current?.prevSibling != null) {
             val prev = current.prevSibling
@@ -60,7 +120,7 @@ class AntlersGotoDeclarationHandler : GotoDeclarationHandler {
             }
         }
 
-        // Now collect the full expression forward
+        // Collect the full expression forward
         val expressionBuilder = StringBuilder()
         var node: PsiElement? = current
         while (node != null) {
@@ -78,7 +138,6 @@ class AntlersGotoDeclarationHandler : GotoDeclarationHandler {
 
         val expression = expressionBuilder.toString()
 
-        // Check if this is a partial tag: partial:path/to/name
         if (!expression.startsWith("partial:")) return null
         val path = expression.removePrefix("partial:")
         return if (path.isNotEmpty()) path else null
@@ -87,18 +146,23 @@ class AntlersGotoDeclarationHandler : GotoDeclarationHandler {
     private fun findPartialFiles(project: Project, partialPath: String): List<PsiElement> {
         val psiManager = PsiManager.getInstance(project)
         val results = mutableListOf<PsiElement>()
-        val scope = GlobalSearchScope.projectScope(project)
+        val scope = GlobalSearchScope.allScope(project)
 
-        // The partial path like "partials/sections/hero" maps to a view file
-        // Try common extensions: .antlers.html, .antlers.php, .blade.php, .html
-        val extensions = listOf("antlers.html", "antlers.php", "blade.php", "html")
-        val fileName = partialPath.substringAfterLast("/")
-
-        for (extension in extensions) {
-            val fullFileName = "$fileName.$extension"
+        // Search by exact filename with path matching
+        for (fullFileName in AntlersPartialPaths.candidateFileNames(partialPath)) {
             val files = FilenameIndex.getVirtualFilesByName(fullFileName, scope)
             for (file in files) {
                 if (matchesPartialPath(file, partialPath)) {
+                    psiManager.findFile(file)?.let { results.add(it) }
+                }
+            }
+        }
+
+        // Fallback: match by filename only (no path check)
+        if (results.isEmpty()) {
+            for (fullFileName in AntlersPartialPaths.candidateFileNames(partialPath)) {
+                val files = FilenameIndex.getVirtualFilesByName(fullFileName, scope)
+                for (file in files) {
                     psiManager.findFile(file)?.let { results.add(it) }
                 }
             }
@@ -108,11 +172,6 @@ class AntlersGotoDeclarationHandler : GotoDeclarationHandler {
     }
 
     private fun matchesPartialPath(file: VirtualFile, partialPath: String): Boolean {
-        // Check if the file's path ends with the expected partial path
-        // e.g., partialPath = "partials/sections/hero"
-        // file path should contain "partials/sections/hero.antlers.html"
-        val normalizedPath = partialPath.replace("/", "/")
-        val filePath = file.path
-        return filePath.contains(normalizedPath)
+        return AntlersPartialPaths.matches(file, partialPath)
     }
 }

@@ -1,0 +1,40 @@
+<list>
+    <option name="ANTLERS_DELIMITER">
+        <value>
+            <option name="FOREGROUND" value="CC7832"/>
+        </value>
+    </option>
+    <option name="ANTLERS_KEYWORD">
+        <value>
+            <option name="FOREGROUND" value="CC7832"/>
+            <option name="FONT_TYPE" value="1"/>
+        </value>
+    </option>
+    <option name="ANTLERS_IDENTIFIER">
+        <value>
+            <option name="FOREGROUND" value="A9B7C6"/>
+        </value>
+    </option>
+    <option name="ANTLERS_TAG_NAME">
+        <value>
+            <option name="FOREGROUND" value="FFC66D"/>
+        </value>
+    </option>
+    <option name="ANTLERS_OPERATOR" baseAttributes="DEFAULT_OPERATION_SIGN"/>
+    <option name="ANTLERS_PIPE">
+        <value>
+            <option name="FOREGROUND" value="CC7832"/>
+        </value>
+    </option>
+    <option name="ANTLERS_PUNCTUATION">
+        <value>
+            <option name="FOREGROUND" value="A9B7C6"/>
+        </value>
+    </option>
+    <option name="ANTLERS_STRING" baseAttributes="DEFAULT_STRING"/>
+    <option name="ANTLERS_NUMBER" baseAttributes="DEFAULT_NUMBER"/>
+    <option name="ANTLERS_COMMENT" baseAttributes="DEFAULT_BLOCK_COMMENT"/>
+    <option name="ANTLERS_PHP_CONTENT" baseAttributes="DEFAULT_TEMPLATE_LANGUAGE_COLOR"/>
+    <option name="ANTLERS_PARAMETER" baseAttributes="DEFAULT_METADATA"/>
+    <option name="ANTLERS_BAD_CHARACTER" baseAttributes="DEFAULT_BAD_CHARACTER"/>
+</list>

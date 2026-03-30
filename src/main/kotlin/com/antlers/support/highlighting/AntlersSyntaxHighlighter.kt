@@ -51,6 +51,16 @@ class AntlersSyntaxHighlighter : SyntaxHighlighterBase() {
             // Operators
             AntlersTokenSets.OPERATORS.contains(tokenType) -> pack(AntlersHighlighterColors.OPERATOR)
 
+            // Punctuation (colon, dot, comma, semicolon, brackets)
+            tokenType == AntlersTokenTypes.COLON ||
+            tokenType == AntlersTokenTypes.DOT ||
+            tokenType == AntlersTokenTypes.COMMA ||
+            tokenType == AntlersTokenTypes.SEMICOLON ||
+            tokenType == AntlersTokenTypes.LPAREN ||
+            tokenType == AntlersTokenTypes.RPAREN ||
+            tokenType == AntlersTokenTypes.LBRACKET ||
+            tokenType == AntlersTokenTypes.RBRACKET -> pack(AntlersHighlighterColors.PUNCTUATION)
+
             // Bad character
             tokenType == AntlersTokenTypes.BAD_CHARACTER -> pack(AntlersHighlighterColors.BAD_CHARACTER)
 

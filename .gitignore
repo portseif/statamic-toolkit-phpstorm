@@ -11,7 +11,7 @@ out/
 .kotlin/
 
 # Generated
-src/main/java/com/antlers/support/lexer/_AntlersLexer.java
+src/main/gen/
 
 # OS
 .DS_Store

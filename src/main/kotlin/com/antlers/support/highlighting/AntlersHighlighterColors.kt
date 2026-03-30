@@ -39,6 +39,9 @@ object AntlersHighlighterColors {
     val PARAMETER: TextAttributesKey =
         createTextAttributesKey("ANTLERS_PARAMETER", DefaultLanguageHighlighterColors.METADATA)
 
+    val PUNCTUATION: TextAttributesKey =
+        createTextAttributesKey("ANTLERS_PUNCTUATION", DefaultLanguageHighlighterColors.DOT)
+
     val BAD_CHARACTER: TextAttributesKey =
         createTextAttributesKey("ANTLERS_BAD_CHARACTER", HighlighterColors.BAD_CHARACTER)
 }

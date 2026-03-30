@@ -3,16 +3,14 @@ package com.antlers.support.file
 import com.intellij.lang.Language
 import com.intellij.lang.LanguageParserDefinitions
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.psi.MultiplePsiFilesPerDocumentFileViewProvider
-import com.intellij.psi.PsiFile
-import com.intellij.psi.PsiManager
+import com.intellij.psi.*
+import com.intellij.psi.AbstractFileViewProvider
 import com.intellij.psi.impl.source.PsiFileImpl
 import com.intellij.psi.templateLanguages.ConfigurableTemplateLanguageFileViewProvider
 import com.intellij.psi.templateLanguages.TemplateDataElementType
-import com.intellij.psi.templateLanguages.TemplateDataLanguageMappings
+import com.intellij.psi.tree.OuterLanguageElementType
 import com.antlers.support.AntlersLanguage
 import com.antlers.support.lexer.AntlersTokenTypes
-import com.antlers.support.parser.AntlersParserDefinition
 import java.util.concurrent.ConcurrentHashMap
 
 class AntlersFileViewProvider(
@@ -32,7 +30,7 @@ class AntlersFileViewProvider(
                     "ANTLERS_TEMPLATE_DATA",
                     AntlersLanguage.INSTANCE,
                     AntlersTokenTypes.TEMPLATE_TEXT,
-                    AntlersOuterElementType("ANTLERS_FRAGMENT")
+                    OuterLanguageElementType("ANTLERS_FRAGMENT", AntlersLanguage.INSTANCE)
                 )
             }
         }
@@ -46,6 +44,29 @@ class AntlersFileViewProvider(
 
     override fun cloneInner(fileCopy: VirtualFile): MultiplePsiFilesPerDocumentFileViewProvider {
         return AntlersFileViewProvider(manager, fileCopy, false, templateLanguage)
+    }
+
+    override fun findElementAt(offset: Int): PsiElement? {
+        // Prefer the template data (HTML) tree for offsets in HTML content.
+        // This enables CSS class navigation, JS references, etc.
+        val templateFile = getPsi(templateDataLanguage)
+        if (templateFile != null) {
+            val element = AbstractFileViewProvider.findElementAt(templateFile, offset)
+            if (element != null && element.node?.elementType !is OuterLanguageElementType) {
+                return element
+            }
+        }
+        return super.findElementAt(offset)
+    }
+
+    override fun findReferenceAt(offset: Int): PsiReference? {
+        // Check the template data (HTML) tree first for CSS/JS references
+        val templateFile = getPsi(templateDataLanguage)
+        if (templateFile != null) {
+            val ref = AbstractFileViewProvider.findReferenceAt(templateFile, offset)
+            if (ref != null) return ref
+        }
+        return super.findReferenceAt(offset)
     }
 
     override fun createFile(lang: Language): PsiFile? {
@@ -64,6 +85,3 @@ class AntlersFileViewProvider(
 
     override fun supportsIncrementalReparse(rootLanguage: Language): Boolean = false
 }
-
-class AntlersOuterElementType(debugName: String) :
-    com.intellij.psi.tree.IElementType(debugName, AntlersLanguage.INSTANCE)

@@ -32,6 +32,7 @@ dependencies {
     }
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.opentest4j:opentest4j:1.3.0")
 }
 
 kotlin {
@@ -53,21 +54,29 @@ intellijPlatform {
 // Grammar-Kit: generate lexer from .flex file
 val generateAntlersLexer by tasks.registering(org.jetbrains.grammarkit.tasks.GenerateLexerTask::class) {
     sourceFile.set(file("grammars/Antlers.flex"))
-    targetOutputDir.set(file("src/main/java/com/antlers/support/lexer"))
+    targetOutputDir.set(file("src/main/gen/com/antlers/support/lexer"))
+}
+
+// Grammar-Kit: generate parser from .bnf file
+val generateAntlersParser by tasks.registering(org.jetbrains.grammarkit.tasks.GenerateParserTask::class) {
+    sourceFile.set(file("grammars/Antlers.bnf"))
+    targetRootOutputDir.set(file("src/main/gen"))
+    pathToParser.set("/com/antlers/support/parser/AntlersParser.java")
+    pathToPsiRoot.set("/com/antlers/support/psi")
 }
 
 tasks {
     compileJava {
-        dependsOn(generateAntlersLexer)
+        dependsOn(generateAntlersLexer, generateAntlersParser)
     }
 
     compileKotlin {
-        dependsOn(generateAntlersLexer)
+        dependsOn(generateAntlersLexer, generateAntlersParser)
     }
 }
 
 sourceSets {
     main {
-        java.srcDirs("src/main/java", "src/main/kotlin")
+        java.srcDirs("src/main/java", "src/main/kotlin", "src/main/gen")
     }
 }

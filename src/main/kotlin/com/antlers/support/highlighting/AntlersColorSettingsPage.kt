@@ -13,12 +13,15 @@ class AntlersColorSettingsPage : ColorSettingsPage {
         private val DESCRIPTORS = arrayOf(
             AttributesDescriptor("Delimiters", AntlersHighlighterColors.DELIMITER),
             AttributesDescriptor("Keywords", AntlersHighlighterColors.KEYWORD),
+            AttributesDescriptor("Tag Names", AntlersHighlighterColors.TAG_NAME),
+            AttributesDescriptor("Parameters", AntlersHighlighterColors.PARAMETER),
             AttributesDescriptor("Identifiers", AntlersHighlighterColors.IDENTIFIER),
             AttributesDescriptor("Operators", AntlersHighlighterColors.OPERATOR),
             AttributesDescriptor("Pipe", AntlersHighlighterColors.PIPE),
             AttributesDescriptor("Strings", AntlersHighlighterColors.STRING),
             AttributesDescriptor("Numbers", AntlersHighlighterColors.NUMBER),
             AttributesDescriptor("Comments", AntlersHighlighterColors.COMMENT),
+            AttributesDescriptor("Punctuation", AntlersHighlighterColors.PUNCTUATION),
             AttributesDescriptor("PHP Content", AntlersHighlighterColors.PHP_CONTENT),
             AttributesDescriptor("Bad Character", AntlersHighlighterColors.BAD_CHARACTER),
         )

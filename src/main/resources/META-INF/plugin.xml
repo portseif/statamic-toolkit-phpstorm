@@ -12,10 +12,18 @@
         <ul>
             <li>Syntax highlighting for <code>.antlers.html</code> and <code>.antlers.php</code> files</li>
             <li>Full HTML/CSS/JS intelligence preserved within template files</li>
+            <li>IntelliSense: code completion for tags, modifiers, variables, and partial paths</li>
+            <li>Auto-close <code>{{ }}</code> delimiters and quotes</li>
+            <li>Cmd+click navigation to partial templates</li>
+            <li>Structure view for template outline</li>
+            <li>Smart Enter between block tag pairs</li>
             <li>Customizable color scheme (Settings &gt; Editor &gt; Color Scheme &gt; Antlers)</li>
             <li>Brace matching for <code>{{ }}</code> delimiters</li>
             <li>Block commenting with <code>{{# #}}</code></li>
-            <li>Recognition of all Antlers constructs: variables, tags, modifiers, conditionals, operators, comments, PHP regions</li>
+            <li>Alpine.js support: JS intelligence in <code>x-data</code>, <code>x-on</code>, <code>@click</code>, etc.</li>
+            <li>Code formatting for Antlers expressions</li>
+            <li>Configurable settings (Settings &gt; Languages &amp; Frameworks &gt; Antlers)</li>
+            <li>Tools menu actions for Statamic content query snippets and controller scaffolds</li>
         </ul>
 
         <p><em>This plugin is not affiliated with, endorsed by, or officially connected to Statamic.
@@ -25,6 +33,8 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>
     <depends>com.intellij.modules.xml</depends>
+    <depends>com.intellij.css</depends>
+    <depends>JavaScript</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- File Type -->
@@ -36,8 +46,8 @@
             patterns="*.antlers.html;*.antlers.php"/>
 
         <!-- FileViewProvider (template language integration) -->
-        <fileType.fileViewProviderFactory
-            filetype="Antlers"
+        <lang.fileViewProviderFactory
+            language="Antlers"
             implementationClass="com.antlers.support.file.AntlersFileViewProviderFactory"/>
 
         <!-- Parser -->
@@ -50,8 +60,35 @@
             language="Antlers"
             implementationClass="com.antlers.support.highlighting.AntlersSyntaxHighlighterFactory"/>
 
+        <editorHighlighterProvider
+            filetype="Antlers"
+            implementationClass="com.antlers.support.highlighting.AntlersEditorHighlighterProvider"/>
+
+        <multiHostInjector
+            implementation="com.antlers.support.injection.AntlersAlpineAttributeInjector"/>
+
+        <psi.referenceContributor
+            language="JavaScript"
+            implementation="com.antlers.support.injection.AntlersAlpineReferenceContributor"/>
+
         <colorSettingsPage
             implementation="com.antlers.support.highlighting.AntlersColorSettingsPage"/>
+
+        <annotator
+            language="Antlers"
+            implementationClass="com.antlers.support.highlighting.AntlersHighlightingAnnotator"/>
+
+        <lang.documentationProvider
+            language="Antlers"
+            implementationClass="com.antlers.support.documentation.AntlersDocumentationProvider"/>
+
+        <!-- Color scheme defaults -->
+        <additionalTextAttributesScheme
+            scheme="Default"
+            file="colorSchemes/AntlersDefault.xml"/>
+        <additionalTextAttributesScheme
+            scheme="Darcula"
+            file="colorSchemes/AntlersDarcula.xml"/>
 
         <!-- Brace Matching -->
         <lang.braceMatcher
@@ -66,5 +103,96 @@
         <!-- Goto Declaration (cmd+click on partials) -->
         <gotoDeclarationHandler
             implementationClass="com.antlers.support.editor.AntlersGotoDeclarationHandler"/>
+
+        <!-- Auto-close {{ }} -->
+        <typedHandler
+            implementationClass="com.antlers.support.editor.AntlersTypedHandler"/>
+
+        <!-- Auto-close quotes -->
+        <lang.quoteHandler
+            language="Antlers"
+            implementationClass="com.antlers.support.editor.AntlersQuoteHandler"/>
+
+        <!-- Smart Enter between block tags -->
+        <enterHandlerDelegate
+            implementationClass="com.antlers.support.editor.AntlersEnterHandler"/>
+
+        <!-- Code Completion (IntelliSense) -->
+        <completion.contributor
+            language="Antlers"
+            implementationClass="com.antlers.support.completion.AntlersCompletionContributor"/>
+
+        <!-- Structure View -->
+        <lang.psiStructureViewFactory
+            language="Antlers"
+            implementationClass="com.antlers.support.structure.AntlersStructureViewFactory"/>
+
+        <!-- Code Formatter -->
+        <lang.formatter
+            language="Antlers"
+            implementationClass="com.antlers.support.formatting.AntlersFormattingModelBuilder"/>
+
+        <!-- Plugin Settings (Settings > Languages & Frameworks > Antlers) -->
+        <applicationConfigurable
+            parentId="language"
+            instance="com.antlers.support.settings.AntlersSettingsConfigurable"
+            id="com.antlers.support.settings"
+            displayName="Antlers"/>
+
+        <applicationService
+            serviceImplementation="com.antlers.support.settings.AntlersSettings"/>
+
+        <!-- Code Style Settings (Settings > Editor > Code Style > Antlers) -->
+        <codeStyleSettingsProvider
+            implementation="com.antlers.support.settings.AntlersCodeStyleSettingsProvider"/>
+
+        <langCodeStyleSettingsProvider
+            implementation="com.antlers.support.settings.AntlersLanguageCodeStyleSettingsProvider"/>
+
     </extensions>
+
+    <actions>
+        <group id="com.antlers.support.actions.StatamicToolsGroup"
+               text="Statamic"
+               description="Statamic and Antlers productivity actions"
+               popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+
+            <group id="com.antlers.support.actions.ContentQueriesGroup"
+                   text="Content Queries"
+                   description="Insert Statamic content query snippets"
+                   popup="true">
+                <action id="com.antlers.support.actions.InsertEntryQueryAction"
+                        class="com.antlers.support.actions.InsertEntryQueryAction"
+                        text="Insert Entry Query"
+                        description="Insert a Statamic entry query snippet"/>
+                <action id="com.antlers.support.actions.InsertSingleEntryQueryAction"
+                        class="com.antlers.support.actions.InsertSingleEntryQueryAction"
+                        text="Insert Single Entry Query"
+                        description="Insert a Statamic query that returns one entry"/>
+                <action id="com.antlers.support.actions.InsertPaginatedEntriesQueryAction"
+                        class="com.antlers.support.actions.InsertPaginatedEntriesQueryAction"
+                        text="Insert Paginated Entry Query"
+                        description="Insert a paginated Statamic entry query snippet"/>
+                <action id="com.antlers.support.actions.InsertGlobalSetQueryAction"
+                        class="com.antlers.support.actions.InsertGlobalSetQueryAction"
+                        text="Insert Global Set Lookup"
+                        description="Insert a Statamic global set lookup snippet"/>
+            </group>
+
+            <group id="com.antlers.support.actions.ControllersGroup"
+                   text="Controllers"
+                   description="Create Statamic-oriented controller scaffolds"
+                   popup="true">
+                <action id="com.antlers.support.actions.CreateBasicStatamicControllerAction"
+                        class="com.antlers.support.actions.CreateBasicStatamicControllerAction"
+                        text="Create Basic Statamic Controller..."
+                        description="Create a Laravel-style controller that renders a view"/>
+                <action id="com.antlers.support.actions.CreateAntlersViewControllerAction"
+                        class="com.antlers.support.actions.CreateAntlersViewControllerAction"
+                        text="Create Antlers View Controller..."
+                        description="Create a controller that returns a Statamic View with template and layout"/>
+            </group>
+        </group>
+    </actions>
 </idea-plugin>
