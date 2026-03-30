@@ -11,22 +11,10 @@ plugins {
 group = providers.gradleProperty("pluginGroup").get()
 version = providers.gradleProperty("pluginVersion").get()
 
-fun extractLatestChangeNotes(changelog: File, releaseVersion: String): String {
+fun extractChangeNotes(changelog: File): String {
     if (!changelog.exists()) return "<p>Initial release.</p>"
 
     val lines = changelog.readLines()
-    val header = "## [$releaseVersion]"
-    val startIndex = lines.indexOfFirst { it.startsWith(header) }
-    if (startIndex == -1) return "<p>Release $releaseVersion</p>"
-
-    val bodyLines = lines
-        .drop(startIndex + 1)
-        .takeWhile { !it.startsWith("## [") }
-        .dropWhile { it.isBlank() }
-        .dropLastWhile { it.isBlank() }
-
-    if (bodyLines.isEmpty()) return "<p>Release $releaseVersion</p>"
-
     val html = StringBuilder()
     var insideList = false
 
@@ -37,22 +25,32 @@ fun extractLatestChangeNotes(changelog: File, releaseVersion: String): String {
         }
     }
 
-    bodyLines.forEach { line ->
+    fun convertInlineMarkdown(text: String): String {
+        return text.replace(Regex("`(.+?)`"), "<code>$1</code>")
+    }
+
+    lines.forEach { line ->
         when {
+            line.startsWith("## [") -> {
+                closeListIfNeeded()
+                val version = line.substringAfter("[").substringBefore("]")
+                html.append("<h2>$version</h2>")
+            }
             line.startsWith("- ") -> {
                 if (!insideList) {
                     html.append("<ul>")
                     insideList = true
                 }
                 html.append("<li>")
-                html.append(line.removePrefix("- ").trim())
+                html.append(convertInlineMarkdown(line.removePrefix("- ").trim()))
                 html.append("</li>")
             }
             line.isBlank() -> closeListIfNeeded()
+            line.startsWith("# ") -> {} // skip top-level heading
             else -> {
                 closeListIfNeeded()
                 html.append("<p>")
-                html.append(line.trim())
+                html.append(convertInlineMarkdown(line.trim()))
                 html.append("</p>")
             }
         }
@@ -96,10 +94,7 @@ intellijPlatform {
         name = providers.gradleProperty("pluginName")
         version = providers.gradleProperty("pluginVersion")
         changeNotes = providers.provider {
-            extractLatestChangeNotes(
-                changelog = layout.projectDirectory.file("CHANGELOG.md").asFile,
-                releaseVersion = providers.gradleProperty("pluginVersion").get()
-            )
+            extractChangeNotes(layout.projectDirectory.file("CHANGELOG.md").asFile)
         }
 
         ideaVersion {

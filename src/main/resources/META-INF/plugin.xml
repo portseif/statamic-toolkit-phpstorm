@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.antlers.support</id>
-    <name>Antlers Support</name>
-    <vendor url="https://github.com/portseif/antlers-support">Chris Seifert</vendor>
+    <name>Antlers</name>
+    <vendor url="https://github.com/portseif/antlers-support" email="chris@portseif.io">Chris Seifert</vendor>
 
     <description><![CDATA[
         <p>Syntax highlighting and editor support for the
