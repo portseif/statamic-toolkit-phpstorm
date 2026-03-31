@@ -75,6 +75,31 @@ PHP intelligence inside `{{? ?}}` (raw PHP) and `{{$ $}}` (echo PHP) blocks is i
 
 Formatting uses `TemplateLanguageFormattingModelBuilder`, not a plain formatting model builder. `AntlersFormattingModelBuilder` must special-case `OuterLanguageElementType` nodes and delegate those back to `SimpleTemplateLanguageFormattingModelBuilder`; otherwise mixed-template formatting breaks around template data boundaries.
 
+`AntlersBlock` (a `TemplateLanguageBlock`) holds a `SpacingBuilder` that enforces token-level spacing rules: one space inside `{{ }}` delimiters, one space around operators, no space around `=` in parameters or `:` in modifier args, no space around `/`. The `SpacingBuilder` is instantiated once per block (in the constructor) and its `getSpacing()` is called before the super-class fallback.
+
+**Known limitation — `{{ else }}` / `{{ elseif }}` alignment**: IntelliJ's template language formatter places these blocks as children of the `DataLanguageBlockWrapper` spanning the HTML content between `{{ if }}` and themselves. That wrapper carries the surrounding HTML indent (e.g. col 8 inside `<main>`). `getIndent()` is relative to the parent block, so there is no way to say "align with sibling `{{ if }}`" using the standard `Indent` API — `getNoneIndent()` preserves the parent indent, and `getAbsoluteNoneIndent()` forces col 0. This is a structural limitation of the template language formatter framework that Blade and Twig plugins share. Fixing it would require a custom formatting model that separates Antlers-level indent decisions from the HTML tree entirely.
+
+**`OP_DIVIDE` spacing**: Use `.around(OP_DIVIDE).none()` in the `SpacingBuilder`, not `.spaces(1)` and not omission. In Antlers, `/` serves as a path separator (`partial:partials/sections/hero`) far more often than an arithmetic operator. `.none()` actively removes previously-introduced spaces on Reformat Code; omitting the rule returns `null` (no opinion, keep existing whitespace) and does nothing to compress them.
+
+**Closing-tag grammar fix**: `{{ /if }}` previously caused a parse error because `tagName` only accepted `IDENTIFIER`, but `if` is lexed as `KEYWORD_IF`. The fix is a `private tagNameAtom` rule in `Antlers.bnf` that accepts `IDENTIFIER | KEYWORD_IF | KEYWORD_UNLESS | KEYWORD_SWITCH`. After this change, `{{ /if }}` parses as a `closingTag` node rather than a `conditionalTag`, so `AntlersFoldingBuilder`'s closing-tag branch must map `"if" → "COND_IF"` and `"unless" → "COND_UNLESS"` to match the stack keys used by the opening conditional branch.
+
+### Code Folding
+
+`AntlersFoldingBuilder` (extends `FoldingBuilderEx`, implements `DumbAware`) uses a stack of `OpenFold(tag, key)` entries to match opening and closing tags in document order. All Antlers tags are siblings under the root `antlersFile` node (flat PSI — no hierarchy), so a traversal of `root.children` with a stack is the only viable matching strategy.
+
+- Regular tag pairs push `tagExpr.tagName.text` as the key; closing tags pop by that name.
+- Conditional pairs use synthetic keys `"COND_IF"` / `"COND_UNLESS"` to avoid colliding with any tag named `"if"`.
+- `{{ /if }}` and `{{ /unless }}` parse as `closingTag` after the grammar fix, so the closing branch remaps `"if" → "COND_IF"` and `"unless" → "COND_UNLESS"` before the stack lookup.
+- `getPlaceholderText` shows the full expression/condition text (trimmed, truncated at 60 chars) so folded blocks read as `{{ if site:environment === 'production' }}...` rather than `{{ if }}...`.
+
+### Settings Configurable Pattern
+
+`AntlersSettingsConfigurable` uses a `CheckboxField(box, read, write)` data class to bind each `JBCheckBox` to its getter/setter in `AntlersSettings.State`. The `fields: List<CheckboxField>` is built once; `isModified`, `apply`, and `reset` each collapse to a single `any`/`forEach` call over the list. When adding a new toggle, add one entry to the `fields` list rather than touching three separate methods.
+
+### Completion Pre-building
+
+`StatamicData` pre-builds `TAG_ELEMENTS`, `MODIFIER_ELEMENTS`, `VARIABLE_ELEMENTS` (`lazy List<LookupElement>`) and `SUB_TAG_ELEMENT_MAP` (`lazy Map<String, List<LookupElement>>`) at class-load time. `AntlersCompletionContributor` calls `result.addAllElements(StatamicData.XXX_ELEMENTS)` — never allocates `LookupElement` instances per keystroke. Do not revert to per-invocation construction.
+
 ### Performance / Stability Guardrails
 
 The plugin has a few editor hot paths where small mistakes are enough to freeze PhpStorm:
@@ -154,6 +179,15 @@ Every version bump must update all of the following:
 - `pin=1` on a rule means "commit after matching first token" — prevents backtracking
 - `recoverWhile` skips tokens until predicate matches — but applying it to rules that can fail cleanly (no tokens consumed) causes false errors. Only use on rules that consume tokens before failing.
 - `private` rules don't generate PSI nodes — use for dispatch/grouping
+- When a grammar rule only accepts `IDENTIFIER` but the lexer produces a keyword token (e.g. `KEYWORD_IF`) for the same text, the parser throws "IDENTIFIER expected, got 'if'". The fix is a `private tagNameAtom` rule that lists `IDENTIFIER | KEYWORD_IF | KEYWORD_UNLESS | ...` and is used wherever the original `IDENTIFIER` was. This is preferable to making those keywords context-sensitive in the lexer.
+
+### `StructureAwareNavBarModelExtension`
+
+`AntlersStructureAwareNavbar` extends `StructureAwareNavBarModelExtension`. The abstract member is a **Kotlin property**, not a Java method — use `override val language: Language = AntlersLanguage.INSTANCE`, not `override fun getLanguage()`. `getIcon()` does not exist on `AbstractNavBarModelExtension`; do not add it. The Antlers PSI tree is flat (all tags are siblings under `antlersFile`), so the navbar can only show within-`{{ }}` context, not tag-parent hierarchy for template content between tags.
+
+### Find Usages
+
+`AntlersFindUsagesProvider` uses `DefaultWordsScanner` from `com.intellij.lang.cacheBuilder` (not `com.intellij.psi.search`). `ChooseByNameContributorEx` is in `com.intellij.navigation` (not `com.intellij.ide.util.gotoByName`). `IdFilter` and `FindSymbolParameters` are in `com.intellij.util.indexing`.
 
 ### Plugin dependencies
 
