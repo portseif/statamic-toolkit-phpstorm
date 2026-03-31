@@ -22,8 +22,12 @@ class AntlersBlock(
 
     override fun getIndent(): Indent {
         return when (myNode.elementType) {
+            // TAG_EXPRESSION and CLOSING_TAG are children of ANTLERS_TAG; giving them
+            // a normal indent keeps tag content aligned inside {{ }}.
+            // CONDITIONAL_TAG must use getNoneIndent() so that {{ else }}, {{ elseif }},
+            // {{ endif }}, and {{ endunless }} are NOT indented inside the delimiters
+            // — they should sit flush with {{ if }} / {{ unless }}, not nested inside them.
             AntlersTypes.TAG_EXPRESSION,
-            AntlersTypes.CONDITIONAL_TAG,
             AntlersTypes.CLOSING_TAG -> Indent.getNormalIndent()
             else -> Indent.getNoneIndent()
         }

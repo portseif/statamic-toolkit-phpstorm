@@ -70,9 +70,17 @@ class AntlersFoldingBuilder : FoldingBuilderEx(), DumbAware {
             }
 
             // Closing regular tag: {{ /collection:blog }}
+            // Also handles {{ /if }} and {{ /unless }}: after the grammar fix these
+            // parse as closingTag (tagNameAtom now accepts KEYWORD_IF/UNLESS), so map
+            // their names to the conditional stack keys used by processConditional().
             closingTag != null -> {
                 val name = closingTag.tagName?.text ?: return
-                val matchIdx = openStack.indexOfLast { it.key == name }
+                val stackKey = when (name) {
+                    "if"     -> "COND_IF"
+                    "unless" -> "COND_UNLESS"
+                    else     -> name
+                }
+                val matchIdx = openStack.indexOfLast { it.key == stackKey }
                 if (matchIdx >= 0) {
                     addPairFold(openStack.removeAt(matchIdx).tag, tag, descriptors, document)
                 }

@@ -202,9 +202,17 @@ private tagSuffix ::= modifier | parameter | tagToken
 
 // ===========================================================================
 // Tag name: collection:blog or partial:nav/header
+//
+// tagNameAtom allows keywords that are also valid closing-tag names:
+//   {{ /if }}      → closes {{ if ... }}
+//   {{ /unless }}  → closes {{ unless ... }}
+//   {{ /switch }}  → closes {{ switch ... }}
+// Without this, the lexer produces KEYWORD_IF (not IDENTIFIER) for "if",
+// causing closingTag to fail with "IDENTIFIER expected, got 'if'".
 // ===========================================================================
 
-tagName ::= IDENTIFIER (COLON IDENTIFIER) * (OP_DIVIDE IDENTIFIER) *
+private tagNameAtom ::= IDENTIFIER | KEYWORD_IF | KEYWORD_UNLESS | KEYWORD_SWITCH
+tagName ::= tagNameAtom (COLON tagNameAtom) * (OP_DIVIDE tagNameAtom) *
 
 // ===========================================================================
 // Parameter: limit="5" or as="posts"

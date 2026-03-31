@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.1]
+- Fixed parse error "IDENTIFIER expected, got 'if'" on `{{ /if }}` and `{{ /unless }}` closing tags. The grammar now accepts keyword-named closing forms alongside regular identifier names.
+- Fixed formatter incorrectly indenting `{{ else }}`, `{{ elseif }}`, and `{{ endif }}` as if they were content inside the `{{ if }}` block instead of sibling tags at the same level.
+
 ## [0.7.0]
 - **Go To Symbol** (Cmd+Alt+O) now includes all Antlers partial templates. Type a partial name to jump directly to the file without needing to know the full path.
 - **Navigation bar breadcrumb** shows the Antlers tag context when the caret is inside a `{{ ... }}` expression — e.g., `_card.antlers.html  >  {{ collection:blog }}` or `>  {{ if }}`.
