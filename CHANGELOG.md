@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.7.4]
+- Fixed formatter adding spaces around `/` — `partial:partials/sections/hero` now stays compact. The formatter actively removes any previously-introduced spaces on Reformat Code.
+
 ## [0.7.3]
 - Fixed formatter adding spaces inside partial paths — `partial:partials/sections/hero` no longer becomes `partial:partials / sections / hero`. The `/` path separator is now left untouched by the spacing rules.
 - Fixed `{{ else }}`, `{{ elseif }}`, `{{ endif }}`, and `{{ endunless }}` being indented as content inside `{{ if }}` after Reformat Code. They now realign to the same column as their opening `{{ if }}` / `{{ unless }}` tag.
