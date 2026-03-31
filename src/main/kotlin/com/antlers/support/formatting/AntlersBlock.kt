@@ -7,6 +7,7 @@ import com.intellij.formatting.templateLanguages.TemplateLanguageBlockFactory
 import com.intellij.lang.ASTNode
 import com.intellij.psi.codeStyle.CodeStyleSettings
 import com.antlers.support.AntlersLanguage
+import com.antlers.support.psi.AntlersAntlersTag
 import com.antlers.support.psi.AntlersTypes
 import com.antlers.support.lexer.AntlersTokenTypes
 
@@ -56,7 +57,10 @@ class AntlersBlock(
         .around(AntlersTokenTypes.OP_PLUS).spaces(1)
         .around(AntlersTokenTypes.OP_MINUS).spaces(1)
         .around(AntlersTokenTypes.OP_MULTIPLY).spaces(1)
-        .around(AntlersTokenTypes.OP_DIVIDE).spaces(1)
+        // OP_DIVIDE is intentionally omitted: it serves as a path separator in tag names
+        // (partial:partials/sections/hero) far more often than as an arithmetic operator.
+        // Enforcing spaces would break every partial path. Users who write arithmetic
+        // division can format it manually; paths must never gain spaces.
         .around(AntlersTokenTypes.OP_MODULO).spaces(1)
         .around(AntlersTokenTypes.OP_POWER).spaces(1)          // **
         .around(AntlersTokenTypes.OP_RANGE).spaces(1)          // ..
@@ -90,11 +94,31 @@ class AntlersBlock(
         return when (myNode.elementType) {
             // TAG_EXPRESSION and CLOSING_TAG are children of ANTLERS_TAG; giving them
             // a normal indent keeps tag content aligned inside {{ }}.
-            // CONDITIONAL_TAG must use getNoneIndent() so that {{ else }}, {{ elseif }},
-            // {{ endif }}, and {{ endunless }} are NOT indented inside the delimiters
-            // — they should sit flush with {{ if }} / {{ unless }}, not nested inside them.
             AntlersTypes.TAG_EXPRESSION,
             AntlersTypes.CLOSING_TAG -> Indent.getNormalIndent()
+
+            // ANTLERS_TAG nodes that are conditional continuations ({{ else }},
+            // {{ elseif }}, {{ endif }}, {{ endunless }}) live in the HTML
+            // DataLanguageBlockWrapper that spans between their opening {{ if }} and
+            // themselves.  That wrapper may carry an inherited indent (e.g. content
+            // lines are at column 4).  Using getAbsoluteNoneIndent() breaks out of
+            // that inherited context and forces these tags to align with the opening
+            // {{ if }} / {{ unless }} tag, regardless of the surrounding HTML indent.
+            AntlersTypes.ANTLERS_TAG -> {
+                val cond = (myNode.psi as? AntlersAntlersTag)?.conditionalTag
+                if (cond != null && (
+                        cond.keywordElse != null ||
+                        cond.keywordElseif != null ||
+                        cond.keywordEndif != null ||
+                        cond.keywordEndunless != null
+                    )
+                ) {
+                    Indent.getAbsoluteNoneIndent()
+                } else {
+                    Indent.getNoneIndent()
+                }
+            }
+
             else -> Indent.getNoneIndent()
         }
     }

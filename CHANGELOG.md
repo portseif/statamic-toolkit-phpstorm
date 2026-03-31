@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.3]
+- Fixed formatter adding spaces inside partial paths — `partial:partials/sections/hero` no longer becomes `partial:partials / sections / hero`. The `/` path separator is now left untouched by the spacing rules.
+- Fixed `{{ else }}`, `{{ elseif }}`, `{{ endif }}`, and `{{ endunless }}` being indented as content inside `{{ if }}` after Reformat Code. They now realign to the same column as their opening `{{ if }}` / `{{ unless }}` tag.
+
 ## [0.7.2]
 - **Reformat Code** now works for Antlers expressions — spacing is enforced around operators (`===`, `&&`, `||`, `+`, etc.), pipes (`|`), delimiters (`{{ }}`), and colons/commas in modifier arguments.
 - **Folded block labels** now show the full expression instead of just the keyword — e.g. `{{ if site:environment === 'production' }}...` instead of `{{ if }}...`. Labels truncate at 60 characters.
