@@ -133,6 +133,9 @@
             language="Antlers"
             implementationClass="com.antlers.support.formatting.AntlersFormattingModelBuilder"/>
 
+        <postFormatProcessor
+            implementation="com.antlers.support.formatting.AntlersConditionalPostFormatProcessor"/>
+
         <!-- Code Folding (tag pairs, conditionals, comments) -->
         <lang.foldingBuilder
             language="Antlers"
@@ -190,6 +193,9 @@
         <!-- Alpine.js Web Types (suppresses "Namespace is not bound" for x-transition:* etc.) -->
         <webSymbols.webTypes source="web-types/alpine-js.web-types.json"
                              enableByDefault="true"/>
+
+        <xml.xmlSuppressionProvider
+            implementation="com.antlers.support.inspections.AntlersAlpineXmlSuppressionProvider"/>
 
     </extensions>
 
