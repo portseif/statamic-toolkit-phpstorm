@@ -2,5 +2,8 @@
     <extensions defaultExtensionNs="com.intellij">
         <platform.lsp.serverSupportProvider
             implementation="com.antlers.support.lsp.AntlersLspServerSupportProvider"/>
+
+        <projectService
+            serviceImplementation="com.antlers.support.lsp.AntlersLspStatusService"/>
     </extensions>
 </idea-plugin>

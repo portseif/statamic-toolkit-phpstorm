@@ -5,17 +5,18 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.ScriptRunnerUtil
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
-import com.intellij.openapi.Disposable
-import com.intellij.openapi.util.Disposer
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 
 enum class StatamicDriver { FLAT_FILE, ELOQUENT, UNKNOWN }
 enum class IndexingStatus { NOT_STARTED, INDEXING, READY, ERROR }
@@ -27,6 +28,7 @@ data class StatamicIndex(
     val globalSets: List<String> = emptyList(),
     val forms: List<String> = emptyList(),
     val assetContainers: List<String> = emptyList(),
+    val entryFieldsByCollection: Map<String, List<String>> = emptyMap(),
 )
 
 /**
@@ -56,6 +58,11 @@ class StatamicProjectCollections(private val project: Project) {
         private set
 
     @Volatile private var loaded = false
+    @Volatile private var refreshInProgress = false
+    @Volatile private var pendingRefresh = false
+
+    private val refreshLock = Any()
+    private val listeners = CopyOnWriteArrayList<Runnable>()
 
     fun ensureLoaded() {
         if (loaded) return
@@ -67,32 +74,59 @@ class StatamicProjectCollections(private val project: Project) {
 
     fun refresh() {
         loaded = true
-        status = IndexingStatus.INDEXING
-        currentStep = "Detecting driver..."
-        statusMessage = "Indexing Statamic project..."
+        val previousState = snapshotState()
+
+        val shouldStart = synchronized(refreshLock) {
+            if (refreshInProgress) {
+                pendingRefresh = true
+                false
+            } else {
+                refreshInProgress = true
+                true
+            }
+        }
+
+        if (!shouldStart) return
+
+        setState(
+            status = IndexingStatus.INDEXING,
+            currentStep = "Detecting driver...",
+            statusMessage = "Indexing Statamic project..."
+        )
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(
             project, "Indexing Statamic resources", true
         ) {
             override fun run(indicator: ProgressIndicator) {
-                indicator.isIndeterminate = false
+                try {
+                    indicator.isIndeterminate = false
 
-                val basePath = project.basePath ?: run {
-                    status = IndexingStatus.ERROR
-                    statusMessage = "No project base path"
-                    return
-                }
+                    val basePath = project.basePath ?: run {
+                        setState(
+                            status = IndexingStatus.ERROR,
+                            statusMessage = "No project base path",
+                            currentStep = ""
+                        )
+                        return
+                    }
 
-                indicator.text = "Detecting Statamic driver..."
-                indicator.fraction = 0.1
-                driver = detectDriver(basePath)
+                    indicator.text = "Detecting Statamic driver..."
+                    indicator.fraction = 0.1
+                    val detectedDriver = detectDriver(basePath)
+                    setState(driver = detectedDriver)
 
-                if (indicator.isCanceled) return
+                    if (indicator.isCanceled) {
+                        restoreState(previousState)
+                        return
+                    }
 
-                if (driver == StatamicDriver.ELOQUENT) {
-                    indexViaArtisan(basePath, indicator)
-                } else {
-                    indexViaFlatFile(basePath, indicator)
+                    if (detectedDriver == StatamicDriver.ELOQUENT) {
+                        indexViaArtisan(basePath, indicator)
+                    } else {
+                        indexViaFlatFile(basePath, indicator)
+                    }
+                } finally {
+                    finishRefresh()
                 }
             }
         })
@@ -101,13 +135,16 @@ class StatamicProjectCollections(private val project: Project) {
     private fun indexViaArtisan(basePath: String, indicator: ProgressIndicator? = null) {
         val phpPath = findPhp()
         if (phpPath == null) {
-            status = IndexingStatus.ERROR
-            statusMessage = "PHP not found — cannot index Eloquent data"
+            setState(
+                status = IndexingStatus.ERROR,
+                statusMessage = "PHP not found — cannot index Eloquent data",
+                currentStep = ""
+            )
             return
         }
 
         // Query all resources in a single artisan call for efficiency
-        currentStep = "Querying database..."
+        setState(currentStep = "Querying database...")
         indicator?.text = "Querying Statamic database..."
         indicator?.fraction = 0.3
         val script = """
@@ -129,38 +166,48 @@ class StatamicProjectCollections(private val project: Project) {
 
             if (output.startsWith("{")) {
                 val parsed = parseJsonObject(output)
-                index = StatamicIndex(
+                indicator?.text = "Scanning entry blueprints..."
+                indicator?.fraction = 0.7
+                val entryFieldsByCollection = StatamicBlueprintFieldScanner.scanCollectionEntryFields(basePath)
+
+                val nextIndex = StatamicIndex(
                     collections = parsed["collections"].orEmpty(),
                     navigations = parsed["navigations"].orEmpty(),
                     taxonomies = parsed["taxonomies"].orEmpty(),
                     globalSets = parsed["global_sets"].orEmpty(),
                     forms = parsed["forms"].orEmpty(),
                     assetContainers = parsed["asset_containers"].orEmpty(),
+                    entryFieldsByCollection = entryFieldsByCollection,
                 )
 
                 indicator?.text = "Processing results..."
-                indicator?.fraction = 0.8
-
-                val total = index.collections.size + index.navigations.size +
-                    index.taxonomies.size + index.globalSets.size +
-                    index.forms.size + index.assetContainers.size
+                indicator?.fraction = 0.9
 
                 indicator?.fraction = 1.0
-                status = IndexingStatus.READY
-                currentStep = ""
-                statusMessage = "$total resource(s) indexed (Eloquent)"
+                setState(
+                    index = nextIndex,
+                    status = IndexingStatus.READY,
+                    currentStep = "",
+                    statusMessage = nextIndex.readyStatusMessage()
+                )
             } else {
-                status = IndexingStatus.ERROR
-                statusMessage = "Unexpected artisan output"
+                setState(
+                    status = IndexingStatus.ERROR,
+                    statusMessage = "Unexpected artisan output",
+                    currentStep = ""
+                )
             }
         } catch (e: Exception) {
-            status = IndexingStatus.ERROR
-            statusMessage = "Artisan failed: ${e.message?.take(80)}"
+            setState(
+                status = IndexingStatus.ERROR,
+                statusMessage = "Artisan failed: ${e.message?.take(80)}",
+                currentStep = ""
+            )
         }
     }
 
     private fun indexViaFlatFile(basePath: String, indicator: ProgressIndicator? = null) {
-        currentStep = "Scanning content directory..."
+        setState(currentStep = "Scanning content directory...")
 
         indicator?.text = "Scanning collections..."
         indicator?.fraction = 0.2
@@ -179,29 +226,34 @@ class StatamicProjectCollections(private val project: Project) {
         val globalSets = scanYamlFiles("$basePath/content/globals")
 
         indicator?.text = "Scanning forms..."
-        indicator?.fraction = 0.8
+        indicator?.fraction = 0.75
         val forms = scanYamlFiles("$basePath/resources/forms")
 
+        indicator?.text = "Scanning entry blueprints..."
+        indicator?.fraction = 0.85
+        val entryFieldsByCollection = StatamicBlueprintFieldScanner.scanCollectionEntryFields(basePath)
+
         indicator?.text = "Scanning asset containers..."
-        indicator?.fraction = 0.9
+        indicator?.fraction = 0.95
         val assetContainers = scanYamlFiles("$basePath/content/assets")
 
-        index = StatamicIndex(
+        val nextIndex = StatamicIndex(
             collections = collections,
             navigations = navigations,
             taxonomies = taxonomies,
             globalSets = globalSets,
             forms = forms,
             assetContainers = assetContainers,
+            entryFieldsByCollection = entryFieldsByCollection,
         )
 
-        val total = collections.size + navigations.size + taxonomies.size +
-            globalSets.size + forms.size + assetContainers.size
-
         indicator?.fraction = 1.0
-        status = IndexingStatus.READY
-        currentStep = ""
-        statusMessage = "$total resource(s) indexed (flat-file)"
+        setState(
+            index = nextIndex,
+            status = IndexingStatus.READY,
+            currentStep = "",
+            statusMessage = nextIndex.readyStatusMessage()
+        )
     }
 
     private fun scanDirectory(path: String): List<String> {
@@ -319,8 +371,88 @@ class StatamicProjectCollections(private val project: Project) {
         watcherDisposable = null
     }
 
+    fun addChangeListener(listener: Runnable) {
+        listeners += listener
+    }
+
+    fun removeChangeListener(listener: Runnable) {
+        listeners -= listener
+    }
+
+    private fun snapshotState() = InternalState(index, driver, status, statusMessage, currentStep)
+
+    private fun restoreState(state: InternalState) {
+        setState(
+            index = state.index,
+            driver = state.driver,
+            status = state.status,
+            statusMessage = state.statusMessage,
+            currentStep = state.currentStep
+        )
+    }
+
+    private fun setState(
+        index: StatamicIndex = this.index,
+        driver: StatamicDriver = this.driver,
+        status: IndexingStatus = this.status,
+        statusMessage: String = this.statusMessage,
+        currentStep: String = this.currentStep
+    ) {
+        val changed = this.index != index ||
+            this.driver != driver ||
+            this.status != status ||
+            this.statusMessage != statusMessage ||
+            this.currentStep != currentStep
+
+        this.index = index
+        this.driver = driver
+        this.status = status
+        this.statusMessage = statusMessage
+        this.currentStep = currentStep
+
+        if (changed) {
+            notifyListeners()
+        }
+    }
+
+    private fun notifyListeners() {
+        if (listeners.isEmpty()) return
+
+        val application = ApplicationManager.getApplication()
+        if (application == null || application.isUnitTestMode) {
+            listeners.forEach(Runnable::run)
+            return
+        }
+
+        application.invokeLater {
+            if (project.isDisposed) return@invokeLater
+            listeners.forEach(Runnable::run)
+        }
+    }
+
+    private fun finishRefresh() {
+        val rerun = synchronized(refreshLock) {
+            refreshInProgress = false
+            val shouldRerun = pendingRefresh
+            pendingRefresh = false
+            shouldRerun
+        }
+
+        if (rerun && !project.isDisposed) {
+            refresh()
+        }
+    }
+
     companion object {
         fun getInstance(project: Project): StatamicProjectCollections =
             project.getService(StatamicProjectCollections::class.java)
     }
 }
+
+private data class InternalState(
+    val index: StatamicIndex,
+    val driver: StatamicDriver,
+    val status: IndexingStatus,
+    val statusMessage: String,
+    val currentStep: String
+)

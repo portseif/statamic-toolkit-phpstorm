@@ -12,18 +12,21 @@
         <ul>
             <li>Syntax highlighting for <code>.antlers.html</code> and <code>.antlers.php</code> files</li>
             <li>Full HTML/CSS/JS intelligence preserved within template files</li>
-            <li>IntelliSense: code completion for tags, modifiers, variables, and partial paths</li>
+            <li>IntelliSense: completion and hover docs for Statamic tags, modifiers, variables, parameters, and partial paths</li>
+            <li>Antlers Language Server integration for formatting and diagnostics</li>
+            <li>Alpine.js support: JS intelligence in <code>x-data</code>, <code>x-on</code>, <code>@click</code>, <code>x-transition</code>, and related attributes</li>
+            <li>PHP intelligence inside <code>{{? ?}}</code> and <code>{{$ $}}</code> blocks</li>
             <li>Auto-close <code>{{ }}</code> delimiters and quotes</li>
-            <li>Cmd+click navigation to partial templates</li>
+            <li>Cmd+click navigation to partial templates and custom Statamic tags/modifiers</li>
             <li>Structure view for template outline</li>
+            <li>Template-aware formatting with Antlers control-flow indentation</li>
             <li>Smart Enter between block tag pairs</li>
             <li>Customizable color scheme (Settings &gt; Editor &gt; Color Scheme &gt; Antlers)</li>
             <li>Brace matching for <code>{{ }}</code> delimiters</li>
             <li>Block commenting with <code>{{# #}}</code></li>
-            <li>Alpine.js support: JS intelligence in <code>x-data</code>, <code>x-on</code>, <code>@click</code>, etc.</li>
-            <li>Code formatting for Antlers expressions</li>
+            <li>Status bar widget with indexing status, Antlers LSP state, resource links, and quick links</li>
             <li>Configurable settings (Settings &gt; Languages &amp; Frameworks &gt; Statamic)</li>
-            <li>Tools menu actions for Statamic content query snippets, controller scaffolds, tag scaffolds, and modifier scaffolds</li>
+            <li>Top-level Statamic menu with content query snippets, controller scaffolds, tag scaffolds, and modifier scaffolds</li>
         </ul>
 
         <p><em>This plugin is not affiliated with, endorsed by, or officially connected to Statamic.
@@ -36,7 +39,6 @@
     <depends>com.intellij.css</depends>
     <depends>JavaScript</depends>
     <depends optional="true" config-file="antlers-php.xml">com.jetbrains.php</depends>
-    <depends optional="true" config-file="antlers-lsp.xml">com.intellij.modules.lsp</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- File Type -->
@@ -219,6 +221,13 @@
 
         <projectService
             serviceImplementation="com.antlers.support.statamic.StatamicProjectCollections"/>
+
+        <!-- Antlers Language Server -->
+        <platform.lsp.serverSupportProvider
+            implementation="com.antlers.support.lsp.AntlersLspServerSupportProvider"/>
+
+        <projectService
+            serviceImplementation="com.antlers.support.lsp.AntlersLspStatusService"/>
 
         <!-- Status bar widget showing Statamic indexing status -->
         <statusBarWidgetFactory

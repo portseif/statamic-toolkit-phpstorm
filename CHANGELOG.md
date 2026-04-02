@@ -2,21 +2,24 @@
 
 ## [0.8.0]
 - **Antlers Language Server** — integrated the Stillat Antlers LSP for formatting and diagnostics, bundled with the plugin (requires Node.js)
+- **LSP visibility in the status widget** — the Statamic popup now surfaces Antlers LSP connection state alongside indexing status so it is obvious when the language server is waiting, starting, connected, or failed
 - **Tag parameter completion** — typing inside `{{ collection }}` now suggests `from=`, `limit=`, `sort=`, `paginate=`, and all official parameters for 14 common tags
 - **Scope-aware variable completion** — inside `{{ collection }}` loops, suggests `title`, `slug`, `url`, `date`, `first`, `last`, `count`, `total_results`, and other contextual fields. Also works inside `nav`, `taxonomy`, `search`, `assets`, and `form` blocks
 - **Collection handle completion** — `{{ collection: }}` auto-suggests collection handles from your project, supporting both flat-file and Eloquent driver (queries the database via artisan)
 - **Go-to custom tag/modifier definition** — Cmd-click on unknown tag names navigates to `app/Tags/ClassName.php`, modifiers to `app/Modifiers/ClassName.php`
 - **Extract to Partial refactoring** — select code, Alt+Enter, "Extract to Antlers partial" creates a new partial file and replaces the selection with `{{ partial:name }}`
+- **Official Statamic docs in-editor** — hover documentation and completion for tags, modifiers, and variables are backed by the official Statamic docs catalog with examples and deep links
 - **Enhanced syntax highlighting** — all parts of tag names are now colored (not just the head), and partial paths (`partial:components/hero`) are underlined to signal navigability
 - **Structure View with HTML landmarks** — `<header>`, `<main>`, `<nav>`, `<section>`, `<footer>`, `<article>`, `<aside>` now appear in the Structure panel alongside Antlers tags, in document order. Tag pair blocks nest their contents as children
-- **Improved formatting** — block tag pairs (`collection`, `nav`, `taxonomy`, `cache`, `scope`, `foreach`, `entries`, `groups`, `items`, etc.) now indent their contents correctly on Reformat Code
+- **Improved formatting** — Reformat Code now handles mixed Antlers/HTML structure more reliably, including `{{ if }}` / `{{ else }}` alignment, HTML parent nesting, and flat runs of standalone partial tags
 - **Auto-indent on Enter** — pressing Enter after a block tag opener auto-indents the new line
 - **Auto-close tag on `/`** — typing `{{ /` inside a block automatically completes the closing tag name
-- **Statamic status bar widget** — shows indexing progress with a popup displaying driver type, indexed resource counts, and handles. Click to refresh or toggle auto-indexing on file changes
+- **Statamic status bar widget** — shows indexing progress with driver type, indexed resource counts, clickable resource directories, a quick link to `resources/views`, and an auto-index toggle
 - **Nested settings pages** — Settings > Languages & Frameworks > Statamic is now organized into sub-pages: Data Source, Editor, Completion, Navigation & Documentation, Language Injection
 - **Eloquent driver auto-detection** — reads `config/statamic/eloquent-driver.php` to detect database-backed collections and queries all Statamic facades (collections, navigations, taxonomies, globals, forms, asset containers)
 - **Auto-close brace fix** — fixed `{{ }}` auto-closer producing triple `}}}` due to IntelliJ's built-in single-brace pairing
 - **Inspections disabled by default** — unknown tag/modifier inspections are now off by default since the LSP provides better diagnostics
+- **Alpine.js false-positive cleanup** — reduced noise from mixed Antlers/Alpine markup, including `x-transition:*` namespace warnings and `x-for`-scoped variable false errors
 
 ## [0.7.4]
 - Fixed formatter adding spaces around `/` — `partial:partials/sections/hero` now stays compact. The formatter actively removes any previously-introduced spaces on Reformat Code.

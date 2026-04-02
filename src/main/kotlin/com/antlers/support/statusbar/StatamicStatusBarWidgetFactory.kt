@@ -1,17 +1,27 @@
 package com.antlers.support.statusbar
 
 import com.antlers.support.AntlersIcons
+import com.antlers.support.lsp.AntlersLspConnectionState
+import com.antlers.support.lsp.AntlersLspStatusService
+import com.antlers.support.lsp.AntlersLspStatusSnapshot
 import com.antlers.support.settings.AntlersSettings
 import com.antlers.support.statamic.IndexingStatus
-import com.antlers.support.statamic.StatamicDriver
 import com.antlers.support.statamic.StatamicProjectCollections
+import com.antlers.support.statamic.displayName
+import com.antlers.support.statamic.entryFields
+import com.antlers.support.statamic.totalResources
+import com.intellij.ide.projectView.ProjectView
+import com.intellij.ide.projectView.impl.ProjectViewPane
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.ui.popup.JBPopup
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.wm.StatusBar
 import com.intellij.openapi.wm.StatusBarWidget
 import com.intellij.openapi.wm.StatusBarWidgetFactory
 import com.intellij.ui.awt.RelativePoint
+import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.Consumer
@@ -32,21 +42,25 @@ private class StatamicStatusBarWidget(private val project: Project) :
     StatusBarWidget, StatusBarWidget.IconPresentation {
 
     private var statusBar: StatusBar? = null
-    private var timer: javax.swing.Timer? = null
+    private val statusChangeListener = Runnable { requestWidgetUpdate() }
 
     override fun ID(): String = "StatamicIndexingStatus"
 
     override fun install(statusBar: StatusBar) {
         this.statusBar = statusBar
-        StatamicProjectCollections.getInstance(project).ensureLoaded()
-        timer = javax.swing.Timer(500) {
-            statusBar.updateWidget(ID())
-            val svc = StatamicProjectCollections.getInstance(project)
-            if (svc.status == IndexingStatus.READY || svc.status == IndexingStatus.ERROR) timer?.delay = 5000
-        }.apply { start() }
+        StatamicProjectCollections.getInstance(project).apply {
+            addChangeListener(statusChangeListener)
+            ensureLoaded()
+        }
+        project.getService(AntlersLspStatusService::class.java)?.addChangeListener(statusChangeListener)
+        requestWidgetUpdate()
     }
 
-    override fun dispose() { timer?.stop(); timer = null; statusBar = null }
+    override fun dispose() {
+        StatamicProjectCollections.getInstance(project).removeChangeListener(statusChangeListener)
+        project.getService(AntlersLspStatusService::class.java)?.removeChangeListener(statusChangeListener)
+        statusBar = null
+    }
     override fun getPresentation(): StatusBarWidget.WidgetPresentation = this
     override fun getIcon(): Icon = AntlersIcons.FILE
 
@@ -77,130 +91,404 @@ private class StatamicStatusBarWidget(private val project: Project) :
         val svc = StatamicProjectCollections.getInstance(project)
         val idx = svc.index
         val dim = JBUI.CurrentTheme.Label.disabledForeground()
-        val midDim = Color(
+        val soft = Color(
             (dim.red + JBUI.CurrentTheme.Label.foreground().red) / 2,
             (dim.green + JBUI.CurrentTheme.Label.foreground().green) / 2,
             (dim.blue + JBUI.CurrentTheme.Label.foreground().blue) / 2
         )
         val bright = JBUI.CurrentTheme.Label.foreground()
+        val success = Color(0x4CAF50)
+        val warning = Color(0xE6A23C)
+        val error = Color(0xE57373)
         val baseFont = UIManager.getFont("Label.font")
-        val tinyFont = baseFont.deriveFont(baseFont.size2D - 2.5f)
-        val boldFont = baseFont.deriveFont(Font.BOLD, baseFont.size2D - 1f)
+        val smallFont = baseFont.deriveFont(baseFont.size2D - 1.5f)
+        val tinyFont = baseFont.deriveFont(baseFont.size2D - 2f)
+        val boldFont = baseFont.deriveFont(Font.BOLD, baseFont.size2D + 1f)
+        val lspStatus = project.getService(AntlersLspStatusService::class.java)?.snapshot()
 
-        val grid = JPanel(GridBagLayout())
-        grid.border = JBUI.Borders.empty(6, 10, 6, 10)
-        var row = 0
+        val root = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = JBUI.Borders.empty(10, 12)
+        }
 
-        fun gbc(x: Int, y: Int, anchor: Int = GridBagConstraints.WEST, weightx: Double = 0.0) =
-            GridBagConstraints().apply {
-                gridx = x; gridy = y
-                this.anchor = anchor; this.weightx = weightx
-                insets = Insets(2, if (x == 0) 0 else 12, 2, 0)
-                fill = GridBagConstraints.NONE
+        fun sectionTitle(text: String) = JBLabel(text).apply {
+            font = baseFont.deriveFont(Font.BOLD, baseFont.size2D - 0.5f)
+            foreground = bright
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+
+        fun sectionSpacer(height: Int = 10): JComponent =
+            (Box.createVerticalStrut(JBUI.scale(height)) as JComponent).apply {
+                alignmentX = Component.LEFT_ALIGNMENT
             }
 
-        fun addHeader(text: String) {
-            grid.add(JBLabel(text).apply { font = boldFont; foreground = bright },
-                gbc(0, row).apply { gridwidth = 2; insets = Insets(4, 0, 2, 0) })
-            row++
+        fun separator(): JSeparator =
+            JSeparator().apply {
+                alignmentX = Component.LEFT_ALIGNMENT
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
+
+        fun statusLine(text: String, color: Color): JPanel {
+            return JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.X_AXIS)
+                alignmentX = Component.LEFT_ALIGNMENT
+                isOpaque = false
+                add(createStatusDot(color))
+                add(Box.createHorizontalStrut(JBUI.scale(6)))
+                add(JBLabel(text).apply {
+                    font = smallFont
+                    foreground = soft
+                    alignmentY = Component.CENTER_ALIGNMENT
+                })
+            }
         }
 
-        fun addRow(label: String, value: String, active: Boolean = true) {
-            grid.add(JBLabel(label).apply { font = tinyFont; foreground = dim },
-                gbc(0, row))
-            grid.add(JBLabel(value).apply {
-                font = tinyFont
-                foreground = if (active) midDim else dim
-                horizontalAlignment = SwingConstants.RIGHT
-            }, gbc(1, row, GridBagConstraints.EAST, 1.0))
-            row++
+        val driverName = svc.driver.displayName()
+
+        val resourceGroups = listOf(
+            StatusBarResourceGroup("Collections", "content/collections", idx.collections),
+            StatusBarResourceGroup("Navigations", "content/navigation", idx.navigations),
+            StatusBarResourceGroup("Taxonomies", "content/taxonomies", idx.taxonomies),
+            StatusBarResourceGroup("Global Sets", "content/globals", idx.globalSets),
+            StatusBarResourceGroup("Forms", "resources/forms", idx.forms),
+            StatusBarResourceGroup("Assets", "content/assets", idx.assetContainers)
+        )
+        val visibleResourceGroups = resourceGroups.filter { it.items.isNotEmpty() }
+        val totalResources = idx.totalResources()
+        val entryFieldCount = idx.entryFields.size
+        val readySummary = buildString {
+            append("Indexed • ")
+            append(totalResources)
+            append(" resources")
+            if (entryFieldCount > 0) {
+                append(" • ")
+                append(entryFieldCount)
+                append(" fields")
+            }
         }
 
-        // Connection section
-        addHeader("Connection")
-        addRow("Driver", when (svc.driver) {
-            StatamicDriver.ELOQUENT -> "Eloquent (database)"
-            StatamicDriver.FLAT_FILE -> "Flat file"
-            StatamicDriver.UNKNOWN -> "—"
-        })
-        addRow("Status", when (svc.status) {
-            IndexingStatus.READY -> "✓  Indexed"
-            IndexingStatus.INDEXING -> "⟳  " + svc.currentStep.ifEmpty { "indexing…" }
-            IndexingStatus.ERROR -> "✗  Error"
-            IndexingStatus.NOT_STARTED -> "Not indexed"
-        })
+        val connectionPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(sectionTitle("Connection"))
+            add(Box.createVerticalStrut(JBUI.scale(6)))
+            add(JBLabel(driverName).apply {
+                font = boldFont
+                foreground = bright
+                alignmentX = Component.LEFT_ALIGNMENT
+            })
+            add(Box.createVerticalStrut(JBUI.scale(2)))
+            add(
+                when (svc.status) {
+                    IndexingStatus.READY -> statusLine(readySummary, success)
+                    IndexingStatus.INDEXING -> statusLine(svc.currentStep.ifEmpty { "Indexing…" }, warning)
+                    IndexingStatus.ERROR -> statusLine(svc.statusMessage.ifEmpty { "Indexing failed" }, error)
+                    IndexingStatus.NOT_STARTED -> statusLine("Not indexed yet", dim)
+                }
+            )
+            add(Box.createVerticalStrut(JBUI.scale(6)))
+            add(lspLine(lspStatus, soft, dim, success, warning, error, smallFont))
+        }
+        root.add(connectionPanel)
+        root.add(sectionSpacer())
+        root.add(separator())
+        root.add(sectionSpacer(8))
 
-        // Spacer
-        grid.add(Box.createVerticalStrut(4), gbc(0, row).apply { gridwidth = 2 })
-        row++
+        val resourcesPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(sectionTitle("Resources"))
+            add(Box.createVerticalStrut(JBUI.scale(6)))
+        }
 
-        // Resources section
-        addHeader("Resources")
-        fun resourceRow(label: String, items: List<String>) {
-            val count = items.size
-            val active = items.isNotEmpty()
+        fun addResourceRow(group: StatusBarResourceGroup) {
+            val row = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                alignmentX = Component.LEFT_ALIGNMENT
+            }
 
-            // Col 0: label with count
-            grid.add(JBLabel("$label  ($count)").apply {
-                font = tinyFont
-                foreground = if (active) midDim else dim
-            }, gbc(0, row))
-
-            // Col 1: handles
-            val handlesText = if (active) {
-                val joined = items.joinToString(", ")
-                if (joined.length > 28) joined.take(26) + "…" else joined
-            } else ""
-            if (handlesText.isNotEmpty()) {
-                grid.add(JBLabel(handlesText).apply {
+            val topLine = JPanel(BorderLayout()).apply {
+                alignmentX = Component.LEFT_ALIGNMENT
+                isOpaque = false
+                add(createResourceLabel(group, bright, smallFont), BorderLayout.WEST)
+                add(JBLabel(group.items.size.toString()).apply {
                     font = tinyFont
-                    foreground = dim
-                    horizontalAlignment = SwingConstants.RIGHT
-                    toolTipText = items.joinToString(", ")
-                }, gbc(1, row, GridBagConstraints.EAST, 1.0))
+                    foreground = soft
+                }, BorderLayout.EAST)
             }
-            row++
+            row.add(topLine)
+
+            row.add(JBLabel(summarizeStatusBarHandles(group.items)).apply {
+                font = tinyFont
+                foreground = dim
+                border = JBUI.Borders.empty(2, 0, 0, 0)
+                toolTipText = group.items.joinToString(", ")
+                alignmentX = Component.LEFT_ALIGNMENT
+            })
+
+            row.maximumSize = Dimension(Int.MAX_VALUE, row.preferredSize.height)
+
+            resourcesPanel.add(row)
+            resourcesPanel.add(Box.createVerticalStrut(JBUI.scale(6)))
         }
-        resourceRow("Collections", idx.collections)
-        resourceRow("Navigations", idx.navigations)
-        resourceRow("Taxonomies", idx.taxonomies)
-        resourceRow("Global Sets", idx.globalSets)
-        resourceRow("Forms", idx.forms)
-        resourceRow("Assets", idx.assetContainers)
 
-        // Separator + controls
-        grid.add(Box.createVerticalStrut(4), gbc(0, row).apply { gridwidth = 2 })
-        row++
-        grid.add(JSeparator().apply { preferredSize = Dimension(0, 1) },
-            gbc(0, row).apply { gridwidth = 2; fill = GridBagConstraints.HORIZONTAL; weightx = 1.0 })
-        row++
-        grid.add(Box.createVerticalStrut(2), gbc(0, row).apply { gridwidth = 2 })
-        row++
+        if (visibleResourceGroups.isEmpty()) {
+            resourcesPanel.add(JBLabel("No indexed resources yet").apply {
+                font = tinyFont
+                foreground = dim
+                alignmentX = Component.LEFT_ALIGNMENT
+            })
+        } else {
+            visibleResourceGroups.forEach(::addResourceRow)
+        }
 
-        // Auto-index checkbox
+        root.add(resourcesPanel)
+        root.add(sectionSpacer(6))
+        root.add(separator())
+        root.add(sectionSpacer(8))
+
+        val quickLinksPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(sectionTitle("Quick Links"))
+            add(Box.createVerticalStrut(JBUI.scale(6)))
+        }
+
+        quickLinksPanel.add(
+            createQuickLinkRow(
+                label = "Views",
+                path = "resources/views",
+                description = "Open template directory",
+                bright = bright,
+                dim = dim,
+                smallFont = smallFont,
+                tinyFont = tinyFont
+            )
+        )
+
+        root.add(quickLinksPanel)
+        root.add(sectionSpacer(6))
+        root.add(separator())
+        root.add(sectionSpacer(8))
+
         val checkbox = JBCheckBox("Auto-index").apply {
-            font = tinyFont
+            font = smallFont
             isSelected = AntlersSettings.getInstance().state.enableAutoIndex
+            alignmentX = Component.LEFT_ALIGNMENT
             addActionListener {
                 AntlersSettings.getInstance().state.enableAutoIndex = isSelected
                 val s = StatamicProjectCollections.getInstance(project)
                 if (isSelected) s.startFileWatcher() else s.stopFileWatcher()
             }
         }
-        grid.add(checkbox, gbc(0, row))
 
-        val refreshBtn = JButton("Refresh").apply {
-            font = tinyFont
-            margin = Insets(1, 6, 1, 6)
+        val refreshLink = ActionLink("Refresh") {
+            StatamicProjectCollections.getInstance(project).refresh()
+            requestWidgetUpdate()
+            SwingUtilities.getWindowAncestor(it.source as Component)?.dispose()
+        }.apply {
+            font = smallFont
             isEnabled = svc.status != IndexingStatus.INDEXING
-            addActionListener {
-                StatamicProjectCollections.getInstance(project).refresh()
-                timer?.delay = 500; statusBar?.updateWidget(ID())
-                SwingUtilities.getWindowAncestor(this)?.dispose()
+        }
+
+        val footer = JPanel(BorderLayout()).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(checkbox, BorderLayout.WEST)
+            add(refreshLink, BorderLayout.EAST)
+        }
+        root.add(footer)
+
+        return root
+    }
+
+    private fun requestWidgetUpdate() {
+        val application = ApplicationManager.getApplication()
+        val update = {
+            if (!project.isDisposed) {
+                statusBar?.updateWidget(ID())
             }
         }
-        grid.add(refreshBtn, gbc(1, row, GridBagConstraints.EAST, 1.0))
 
-        return grid
+        if (application == null) {
+            update()
+        } else {
+            application.invokeLater(update)
+        }
     }
+
+    private fun lspLine(
+        snapshot: AntlersLspStatusSnapshot?,
+        soft: Color,
+        dim: Color,
+        success: Color,
+        warning: Color,
+        error: Color,
+        font: Font
+    ): JPanel {
+        val (label, color) = when (snapshot?.state) {
+            AntlersLspConnectionState.CONNECTED -> snapshot.message to success
+            AntlersLspConnectionState.STARTING -> snapshot.message to warning
+            AntlersLspConnectionState.ERROR -> snapshot.message to error
+            AntlersLspConnectionState.WAITING -> snapshot.message to dim
+            null -> "Unavailable in this IDE" to dim
+        }
+
+        return JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            alignmentX = Component.LEFT_ALIGNMENT
+            isOpaque = false
+            add(JBLabel("Antlers LSP").apply {
+                foreground = soft
+                this.font = font
+            })
+            add(Box.createHorizontalStrut(JBUI.scale(8)))
+            add(JBLabel(label).apply {
+                foreground = color
+                this.font = font
+            })
+        }
+    }
+
+    private fun createResourceLabel(group: StatusBarResourceGroup, foreground: Color, font: Font): JComponent {
+        return createPathLink(
+            label = group.label,
+            path = group.path,
+            foreground = foreground,
+            font = font
+        )
+    }
+
+    private fun createQuickLinkRow(
+        label: String,
+        path: String,
+        description: String,
+        bright: Color,
+        dim: Color,
+        smallFont: Font,
+        tinyFont: Font
+    ): JComponent {
+        return JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            alignmentX = Component.LEFT_ALIGNMENT
+
+            add(createPathLink(label, path, bright, smallFont).apply {
+                alignmentX = Component.LEFT_ALIGNMENT
+            })
+
+            add(JBLabel(description).apply {
+                font = tinyFont
+                foreground = dim
+                border = JBUI.Borders.empty(2, 0, 0, 0)
+                toolTipText = path
+                alignmentX = Component.LEFT_ALIGNMENT
+            })
+
+            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+        }
+    }
+
+    private fun createPathLink(label: String, path: String, foreground: Color, font: Font): JComponent {
+        val target = findResourceDirectory(project, path)
+        return if (target == null) {
+            JBLabel(label).apply {
+                this.font = font
+                this.foreground = foreground
+            }
+        } else {
+            ActionLink(label) {
+                openResourceDirectory(project, path)
+                SwingUtilities.getWindowAncestor(it.source as Component)?.dispose()
+            }.apply {
+                this.font = font
+                toolTipText = "Open $path"
+            }
+        }
+    }
+}
+
+private data class StatusBarResourceGroup(
+    val label: String,
+    val path: String,
+    val items: List<String>
+)
+
+private fun createStatusDot(color: Color): JComponent {
+    val diameter = JBUI.scale(7)
+    return object : JComponent() {
+        init {
+            preferredSize = Dimension(diameter, diameter)
+            minimumSize = preferredSize
+            maximumSize = preferredSize
+            alignmentY = Component.CENTER_ALIGNMENT
+            isOpaque = false
+        }
+
+        override fun paintComponent(g: Graphics) {
+            val g2 = g.create() as Graphics2D
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.color = color
+                g2.fillOval(0, 0, diameter, diameter)
+            } finally {
+                g2.dispose()
+            }
+        }
+    }
+}
+
+private fun findResourceDirectory(project: Project, relativePath: String) =
+    project.basePath
+        ?.let { "$it/$relativePath" }
+        ?.let(LocalFileSystem.getInstance()::findFileByPath)
+
+private fun openResourceDirectory(project: Project, relativePath: String) {
+    val target = project.basePath
+        ?.let { "$it/$relativePath" }
+        ?.let(LocalFileSystem.getInstance()::refreshAndFindFileByPath)
+        ?: return
+    val projectView = ProjectView.getInstance(project)
+    projectView.changeView(ProjectViewPane.ID)
+    projectView.select(null, target, false)
+}
+
+internal fun summarizeStatusBarHandles(items: List<String>, maxLength: Int = 42): String {
+    if (items.isEmpty()) return ""
+
+    val shown = mutableListOf<String>()
+    for ((index, item) in items.withIndex()) {
+        val hiddenAfterThis = items.size - index - 1
+        val candidateItems = shown + item
+        val candidateText = candidateItems.joinToString(", ")
+        val candidateWithSuffix = if (hiddenAfterThis > 0) "$candidateText +$hiddenAfterThis" else candidateText
+
+        if (candidateWithSuffix.length <= maxLength || shown.isEmpty()) {
+            shown += item
+            continue
+        }
+        break
+    }
+
+    val hiddenCount = items.size - shown.size
+    if (hiddenCount <= 0) {
+        return truncateStatusBarHandleText(shown.joinToString(", "), maxLength)
+    }
+
+    val suffix = " +$hiddenCount"
+    var visibleText = shown.joinToString(", ")
+    while (shown.size > 1 && visibleText.length + suffix.length > maxLength) {
+        shown.removeAt(shown.lastIndex)
+        visibleText = shown.joinToString(", ")
+    }
+
+    if (visibleText.length + suffix.length <= maxLength) {
+        return visibleText + suffix
+    }
+
+    return truncateStatusBarHandleText(visibleText, maxLength - suffix.length) + suffix
+}
+
+private fun truncateStatusBarHandleText(text: String, maxLength: Int): String {
+    if (text.length <= maxLength) return text
+    if (maxLength <= 1) return "…"
+    return text.take(maxLength - 1).trimEnd() + "…"
 }

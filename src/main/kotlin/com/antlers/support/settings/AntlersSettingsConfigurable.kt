@@ -3,6 +3,7 @@ package com.antlers.support.settings
 import com.antlers.support.statamic.IndexingStatus
 import com.antlers.support.statamic.StatamicDriver
 import com.antlers.support.statamic.StatamicProjectCollections
+import com.antlers.support.statamic.displayName
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.SearchableConfigurable
 import com.intellij.openapi.options.ShowSettingsUtil
@@ -145,10 +146,10 @@ class DataSourceConfigurable : Configurable {
         val project = ProjectManager.getInstance().openProjects.firstOrNull() ?: return
         val service = StatamicProjectCollections.getInstance(project)
 
-        driverValue?.text = when (service.driver) {
-            StatamicDriver.ELOQUENT -> "Eloquent (database)"
-            StatamicDriver.FLAT_FILE -> "Flat file"
-            StatamicDriver.UNKNOWN -> "not detected"
+        driverValue?.text = if (service.driver == StatamicDriver.UNKNOWN) {
+            "not detected"
+        } else {
+            service.driver.displayName()
         }
 
         statusValue?.text = when (service.status) {

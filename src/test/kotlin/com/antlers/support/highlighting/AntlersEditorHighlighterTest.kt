@@ -66,6 +66,30 @@ class AntlersEditorHighlighterTest : BasePlatformTestCase() {
         )
     }
 
+    fun testSemanticHighlightingUnderlinesOnlyPartialPathPortion() {
+        myFixture.configureByText(
+            "demo.antlers.html",
+            """
+            {{ partial:partials/sections/footer }}
+            """.trimIndent()
+        )
+        PsiDocumentManager.getInstance(project).commitAllDocuments()
+
+        val infos = myFixture.doHighlighting()
+        val text = myFixture.file.text
+        val pathHighlights = infos
+            .filter { it.forcedTextAttributesKey == AntlersHighlighterColors.TAG_PATH }
+            .map { text.substring(it.startOffset, it.endOffset) }
+        val tagHighlights = infos
+            .filter { it.forcedTextAttributesKey == AntlersHighlighterColors.TAG_NAME }
+            .map { text.substring(it.startOffset, it.endOffset) }
+
+        assertContainsElements(pathHighlights, "partials", "sections", "footer", "/")
+        assertDoesntContain(pathHighlights, "partial")
+        assertDoesntContain(pathHighlights, ":")
+        assertContainsElements(tagHighlights, "partial", ":")
+    }
+
     fun testSemanticHighlightingOnlyColorsTagHeadForNamespacedTag() {
         myFixture.configureByText(
             "demo.antlers.html",
@@ -85,6 +109,30 @@ class AntlersEditorHighlighterTest : BasePlatformTestCase() {
 
         assertContainsElements(tagNameHighlights, "nav", "footer_product")
         assertDoesntContain(tagNameHighlights, "url")
+        assertDoesntContain(tagNameHighlights, "title")
+    }
+
+    fun testSemanticHighlightingTreatsEntryBlockTagsAsRealTags() {
+        myFixture.configureByText(
+            "demo.antlers.html",
+            """
+            {{ collection:posts }}
+                {{ entry }}
+                    <h2>{{ title }}</h2>
+                {{ /entry }}
+            {{ /collection:posts }}
+            """.trimIndent()
+        )
+        PsiDocumentManager.getInstance(project).commitAllDocuments()
+
+        val infos = myFixture.doHighlighting()
+        val text = myFixture.file.text
+        val tagNameHighlights = infos
+            .filter { it.forcedTextAttributesKey == AntlersHighlighterColors.TAG_NAME }
+            .map { text.substring(it.startOffset, it.endOffset) }
+
+        assertContainsElements(tagNameHighlights, "collection", "posts", "entry")
+        assertTrue(tagNameHighlights.count { it == "entry" } >= 2)
         assertDoesntContain(tagNameHighlights, "title")
     }
 }

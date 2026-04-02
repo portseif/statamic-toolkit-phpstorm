@@ -151,6 +151,7 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
             ControlTagKind.OPEN_UNLESS,
             ControlTagKind.OPEN_SWITCH,
             ControlTagKind.OPEN_TAG_PAIR,
+            ControlTagKind.CONTENT_LINE,
             ControlTagKind.OTHER_TAG -> frames.size
 
             ControlTagKind.ELSE,
@@ -207,6 +208,7 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
                 }
             }
             ControlTagKind.HTML_SELF_CLOSING,
+            ControlTagKind.CONTENT_LINE,
             ControlTagKind.ELSE,
             ControlTagKind.ELSEIF,
             ControlTagKind.OTHER_TAG -> Unit
@@ -262,6 +264,7 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
         CLOSE_SWITCH,
         OPEN_TAG_PAIR,
         CLOSE_TAG_PAIR,
+        CONTENT_LINE,
         OTHER_TAG
     }
 
@@ -290,7 +293,7 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
             return StructuralLine(ControlTagKind.HTML_OPEN, match.groupValues[1].lowercase())
         }
 
-        return null
+        return StructuralLine(ControlTagKind.CONTENT_LINE)
     }
 
     private fun ArrayDeque<StructureFrame>.lastMatchingIndex(predicate: (StructureFrame) -> Boolean): Int? {

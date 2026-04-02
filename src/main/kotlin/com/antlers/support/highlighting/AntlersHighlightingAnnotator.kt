@@ -1,5 +1,6 @@
 package com.antlers.support.highlighting
 
+import com.antlers.support.AntlersBlockTags
 import com.antlers.support.lexer.AntlersTokenTypes
 import com.antlers.support.psi.AntlersClosingTag
 import com.antlers.support.psi.AntlersModifier
@@ -36,13 +37,18 @@ class AntlersHighlightingAnnotator : Annotator {
             }
         }
 
-        // Highlight : and / inside tag names with tag color
+        // Highlight separators inside tag names.
         if (elementType == AntlersTokenTypes.COLON || elementType == AntlersTokenTypes.OP_DIVIDE) {
             val parent = element.parent
             if (parent is AntlersTagName && isTagLike(parent)) {
                 val fullText = parent.text ?: return
                 if (isPartialPath(fullText)) {
-                    applyHighlight(holder, element, AntlersHighlighterColors.TAG_PATH)
+                    val attributes = if (elementType == AntlersTokenTypes.OP_DIVIDE) {
+                        AntlersHighlighterColors.TAG_PATH
+                    } else {
+                        AntlersHighlighterColors.TAG_NAME
+                    }
+                    applyHighlight(holder, element, attributes)
                 } else {
                     applyHighlight(holder, element, AntlersHighlighterColors.TAG_NAME)
                 }
@@ -81,6 +87,7 @@ class AntlersHighlightingAnnotator : Annotator {
             is AntlersClosingTag -> true
             is AntlersTagExpression -> {
                 container.parameterList.isNotEmpty() ||
+                    AntlersBlockTags.isBlockTag(tagName.text) ||
                     tagName.text.contains(':') ||
                     tagName.text.contains('/')
             }

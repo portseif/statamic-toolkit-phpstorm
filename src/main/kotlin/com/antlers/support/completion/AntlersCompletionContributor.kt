@@ -109,7 +109,11 @@ private class AntlersCompletionProvider : CompletionProvider<CompletionParameter
         if (settings.enableVariableCompletion) {
             val enclosingTag = findEnclosingTagPair(parameters)
             if (enclosingTag != null) {
-                val scopeVars = StatamicScopeVariables.forTag(enclosingTag)
+                val scopeVars = StatamicScopeVariables.forTag(
+                    project = position.project,
+                    tagName = enclosingTag.name,
+                    tagText = enclosingTag.text
+                )
                 for (v in scopeVars) {
                     result.addElement(
                         LookupElementBuilder.create(v.name)
@@ -137,14 +141,14 @@ private class AntlersCompletionProvider : CompletionProvider<CompletionParameter
      * enclosing tag pair (e.g., collection, nav, taxonomy) that the caret
      * is inside. Uses a stack to match opening/closing tags.
      */
-    private fun findEnclosingTagPair(parameters: CompletionParameters): String? {
+    private fun findEnclosingTagPair(parameters: CompletionParameters): EnclosingTagScope? {
         val position = parameters.position
         val antlersFile = position.containingFile?.viewProvider
             ?.getPsi(AntlersLanguage.INSTANCE) ?: return null
         val caretOffset = parameters.offset
 
         // Walk all top-level children and use a stack to track open tag pairs
-        val openTags = mutableListOf<String>()
+        val openTags = mutableListOf<EnclosingTagScope>()
 
         for (child in antlersFile.children) {
             if (child.textRange.startOffset >= caretOffset) break
@@ -160,13 +164,13 @@ private class AntlersCompletionProvider : CompletionProvider<CompletionParameter
                     if (closeName != null) {
                         // Pop matching tag from stack
                         val closeRoot = closeName.substringBefore(':')
-                        val idx = openTags.indexOfLast { it.substringBefore(':') == closeRoot }
+                        val idx = openTags.indexOfLast { it.name.substringBefore(':') == closeRoot }
                         if (idx >= 0) openTags.removeAt(idx)
                     }
                 } else if (tagName != null) {
                     val name = tagName.text
                     if (name != null && StatamicScopeVariables.hasScopeVariables(name)) {
-                        openTags.add(name)
+                        openTags.add(EnclosingTagScope(name = name, text = tagExpr?.text ?: child.text))
                     }
                 }
             }
@@ -210,3 +214,8 @@ private class AntlersCompletionProvider : CompletionProvider<CompletionParameter
         }
     }
 }
+
+private data class EnclosingTagScope(
+    val name: String,
+    val text: String
+)

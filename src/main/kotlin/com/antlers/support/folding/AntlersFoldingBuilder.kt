@@ -152,19 +152,7 @@ class AntlersFoldingBuilder : FoldingBuilderEx(), DumbAware {
 
     override fun getPlaceholderText(node: ASTNode): String = when (val psi = node.psi) {
         is AntlersAntlersTag -> {
-            val condTag = psi.conditionalTag
-            // Show the full expression/condition text so folded blocks remain readable,
-            // e.g. "{{ if site:environment === 'production' }}..." instead of "{{ if }}..."
-            // Truncate at 60 chars so very long conditions don't overflow the gutter.
-            val rawText: String? = when {
-                psi.tagExpression != null -> psi.tagExpression!!.text.trim()
-                condTag?.keywordIf != null || condTag?.keywordUnless != null -> condTag!!.text.trim()
-                else -> null
-            }
-            if (rawText != null) {
-                val display = if (rawText.length > 60) rawText.take(57) + "…" else rawText
-                "{{ $display }}..."
-            } else "{{ ... }}"
+            openingTagPlaceholder(psi) ?: "{{ ... }}"
         }
         is AntlersComment      -> "{{# ... #}}"
         is AntlersNoparseBlock -> "{{ noparse }}..."
@@ -173,4 +161,20 @@ class AntlersFoldingBuilder : FoldingBuilderEx(), DumbAware {
 
     /** Tag pairs and block constructs start expanded — let the user collapse them. */
     override fun isCollapsedByDefault(node: ASTNode): Boolean = false
+
+    internal companion object {
+        internal fun openingTagPlaceholder(tag: AntlersAntlersTag): String? {
+            val rawTag = tag.text.trim()
+            if (!rawTag.startsWith("{{") || !rawTag.endsWith("}}")) return null
+
+            val innerText = rawTag
+                .removePrefix("{{")
+                .removeSuffix("}}")
+                .trim()
+                .ifBlank { return null }
+
+            val display = if (innerText.length > 60) innerText.take(57) + "…" else innerText
+            return "{{ $display }}..."
+        }
+    }
 }

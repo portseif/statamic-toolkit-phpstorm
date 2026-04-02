@@ -1,5 +1,7 @@
 package com.antlers.support.statamic
 
+import com.intellij.openapi.project.Project
+
 /**
  * Variables available inside tag pair loops.
  * These are injected into the completion context when the caret
@@ -102,7 +104,6 @@ object StatamicScopeVariables {
     )
 
     private val scopesByTag: Map<String, List<ScopeVariable>> = mapOf(
-        "collection" to LOOP_VARIABLES + ENTRY_FIELDS,
         "nav" to LOOP_VARIABLES + NAV_FIELDS,
         "taxonomy" to LOOP_VARIABLES + TAXONOMY_FIELDS,
         "search" to LOOP_VARIABLES + SEARCH_FIELDS,
@@ -117,12 +118,93 @@ object StatamicScopeVariables {
      * Uses the root tag name (before ':').
      */
     fun forTag(tagName: String): List<ScopeVariable> {
+        return forTag(project = null, tagName = tagName, tagText = tagName)
+    }
+
+    fun forTag(project: Project?, tagName: String, tagText: String = tagName): List<ScopeVariable> {
         val rootName = tagName.substringBefore(':')
-        return scopesByTag[rootName].orEmpty()
+        return when (rootName) {
+            "collection" -> LOOP_VARIABLES + ENTRY_FIELDS + customEntryFields(project, tagName, tagText)
+            else -> scopesByTag[rootName].orEmpty()
+        }
     }
 
     fun hasScopeVariables(tagName: String): Boolean {
         val rootName = tagName.substringBefore(':')
-        return scopesByTag.containsKey(rootName)
+        return rootName == "collection" || scopesByTag.containsKey(rootName)
+    }
+
+    internal fun extractCollectionHandles(tagName: String, tagText: String): List<String> {
+        val namespacedHandle = tagName.substringAfter(':', "")
+            .takeIf { it.isNotBlank() }
+            ?.substringBefore(':')
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        if (namespacedHandle != null) {
+            return listOf(namespacedHandle)
+        }
+
+        val parameterHandles = collectionHandlePattern.findAll(tagText)
+            .flatMap { match ->
+                match.groupValues[3].split('|').asSequence()
+            }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toList()
+
+        return parameterHandles.distinct()
+    }
+
+    internal fun customEntryFields(
+        project: Project?,
+        tagName: String,
+        tagText: String,
+        indexedEntryFieldsByCollection: Map<String, List<String>>? = null
+    ): List<ScopeVariable> {
+        val fieldIndex = indexedEntryFieldsByCollection
+            ?: project?.let { StatamicProjectCollections.getInstance(it).index.entryFieldsByCollection }
+            ?: emptyMap()
+        if (fieldIndex.isEmpty()) return emptyList()
+
+        val collectionHandles = extractCollectionHandles(tagName, tagText)
+        val fieldNames = if (collectionHandles.isEmpty()) {
+            fieldIndex.values.asSequence().flatten()
+        } else {
+            collectionHandles.asSequence().flatMap { fieldIndex[it].orEmpty().asSequence() }
+        }
+
+        return fieldNames
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+            .filterNot { builtInScopeVariableNames.contains(it) }
+            .map { fieldName ->
+                ScopeVariable(
+                    name = fieldName,
+                    description = customFieldDescription(collectionHandles),
+                    type = "field"
+                )
+            }
+            .toList()
+    }
+
+    private val collectionHandlePattern = Regex("""\b(from|in|handle|collection)\s*=\s*(['"])(.*?)\2""")
+
+    private val builtInScopeVariableNames = (
+        LOOP_VARIABLES +
+            ENTRY_FIELDS +
+            NAV_FIELDS +
+            TAXONOMY_FIELDS +
+            SEARCH_FIELDS +
+            ASSET_FIELDS +
+            FORM_FIELDS
+        ).mapTo(linkedSetOf()) { it.name }
+
+    private fun customFieldDescription(collectionHandles: List<String>): String {
+        return when (collectionHandles.size) {
+            0 -> "Indexed blueprint field"
+            1 -> "Blueprint field from ${collectionHandles.first()}"
+            else -> "Blueprint field from ${collectionHandles.joinToString(", ")}"
+        }
     }
 }

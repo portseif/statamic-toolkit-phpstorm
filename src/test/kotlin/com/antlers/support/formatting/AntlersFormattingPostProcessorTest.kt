@@ -207,6 +207,33 @@ class AntlersFormattingPostProcessorTest : BasePlatformTestCase() {
         )
     }
 
+    fun testReformatIndentsNestedCollectionEntryBlocksWithHtmlContent() {
+        myFixture.configureByText(
+            "demo.antlers.html",
+            """
+            {{ collection:posts }}
+            {{ entry }}
+            <h2>{{ title }}</h2>
+            <p>{{ excerpt }}</p>
+            {{ /entry }}
+            {{ /collection:posts }}
+            """.trimIndent()
+        )
+
+        reformatCurrentFile()
+
+        myFixture.checkResult(
+            """
+            {{ collection:posts }}
+                {{ entry }}
+                    <h2>{{ title }}</h2>
+                    <p>{{ excerpt }}</p>
+                {{ /entry }}
+            {{ /collection:posts }}
+            """.trimIndent()
+        )
+    }
+
     private fun reformatCurrentFile() {
         PsiDocumentManager.getInstance(project).commitAllDocuments()
         WriteCommandAction.runWriteCommandAction(project) {

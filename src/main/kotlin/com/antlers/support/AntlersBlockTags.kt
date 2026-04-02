@@ -13,7 +13,7 @@ object AntlersBlockTags {
         "installed", "member", "oauth", "protect", "set", "obfuscate",
         "cookie", "user_groups", "user_roles",
         // Nested loop/group tags used inside collection and other contexts
-        "groups", "group", "items", "values", "options", "fields",
+        "entry", "groups", "group", "items", "values", "options", "fields",
     )
 
     fun isBlockTag(tagName: String): Boolean {
