@@ -31,6 +31,8 @@ Runtime plugin dependencies must be declared in both places:
 
 If either side is missing, features can silently fail. Optional dependencies must use `<depends optional="true" config-file="...">`.
 
+**Important**: `<depends>` only accepts **plugin IDs** (e.g. `com.jetbrains.php`, `JavaScript`), not IntelliJ v2 module names (e.g. `intellij.platform.lsp`). Attempting to use a module name as a `<depends>` target will silently fail — the optional config file never loads and services registered there are never available. For platform APIs that are part of the core (like the LSP API in 2025.1+), register extensions directly in `plugin.xml` instead of using an optional dependency.
+
 ## Core Architecture
 
 ### Dual PSI Tree
@@ -211,8 +213,11 @@ Architecture:
 
 - `AntlersLspServerSupportProvider` triggers the server when `.antlers.html`/`.antlers.php` files open
 - `AntlersLspServerDescriptor` extracts the bundled JS to a temp directory and launches it via `node --stdio`
-- Registered as an optional dependency: `<depends optional="true" config-file="antlers-lsp.xml">com.intellij.modules.lsp</depends>`
+- The LSP server and `AntlersLspStatusService` are registered directly in `plugin.xml`, not via an optional dependency. The LSP API (`intellij.platform.lsp`) is part of the core platform in PhpStorm 2025.1+, so no `<depends>` guard is needed. **Do not use `<depends optional="true">com.intellij.modules.lsp</depends>` or `<depends>intellij.platform.lsp</depends>`** — neither is a valid plugin ID. The `<depends>` tag only works with plugin IDs (like `com.jetbrains.php`), not v2 module names.
+- Native PSI is the source of truth for completion, hover, go-to-definition, partial navigation, and other Antlers-aware editor features. LSP should be used for formatting and diagnostics.
+- LSP completion is intentionally disabled via a custom `LspCompletionSupport` override because mixing LSP completion with `AntlersCompletionContributor` creates duplicate suggestions.
 - LSP hover and go-to-definition are disabled (native PSI handles those); LSP formatting and diagnostics are enabled
+- The extracted temp server copy is written as `antlersls-statamic-toolkit.js` and patched to remove the VS Code-specific `antlers/projectDetailsAvailable` request. Without that patch, the server starts and then disconnects unexpectedly under JetBrains' generic LSP client.
 - Requires Node.js on the user's machine; finds it via Herd path, Homebrew, or system PATH
 
 To rebuild the bundled server from upstream:
@@ -277,18 +282,19 @@ When updating parameter data for a tag, verify against the official Statamic doc
 `StatamicScopeVariables` defines variables available inside tag pair loops:
 
 - **Loop variables** (`first`, `last`, `count`, `index`, `total_results`, etc.) — available in all tag pair contexts
-- **Tag-specific fields** — `collection` gets entry fields (`title`, `slug`, `url`, `date`, etc.), `nav` gets nav fields (`is_current`, `children`, `depth`), `taxonomy`/`search`/`assets`/`form` each have their own
+- **Tag-specific fields** — `collection` gets built-in entry fields (`title`, `slug`, `url`, `date`, etc.) plus indexed blueprint fields from `StatamicProjectCollections`, `nav` gets nav fields (`is_current`, `children`, `depth`), `taxonomy`/`search`/`assets`/`form` each have their own
 
-The completion contributor detects scope by walking the flat Antlers PSI tree with a stack (similar to the folding builder) to find the nearest enclosing unclosed block tag.
+The completion contributor detects scope by walking the flat Antlers PSI tree with a stack (similar to the folding builder) to find the nearest enclosing unclosed block tag. For collection scopes, it should preserve both the tag name and the raw tag text so `collection:posts` and `collection from="posts"` can both resolve collection-specific blueprint fields.
 
 ### Collection Handle Discovery
 
-`StatamicProjectCollections` is a project-level service that discovers collection handles (and other Statamic resources) from both flat-file and Eloquent driver sources.
+`StatamicProjectCollections` is a project-level service that discovers collection handles (and other Statamic resources) from both flat-file and Eloquent driver sources. It also indexes collection entry fields from `resources/blueprints/collections` so completion can surface real project fields inside collection loops.
 
 Rules:
 
-- **Flat-file driver**: scans `content/collections/`, `content/navigation/`, `content/taxonomies/`, etc. for directories and YAML files
+- **Default (flat-file) driver**: scans `content/collections/`, `content/navigation/`, `content/taxonomies/`, etc. for directories and YAML files
 - **Eloquent driver**: runs `php artisan tinker --execute` to query all Statamic Facades in a single call
+- **Entry fields**: collection blueprint YAML is scanned locally for both drivers; Eloquent still uses blueprint files for field discovery because the field schema lives in blueprints, not entry records
 - **Driver detection**: reads `config/statamic/eloquent-driver.php` and checks if `collections.driver` is `'eloquent'`
 - **Background execution**: uses `ProgressManager.getInstance().run(Task.Backgroundable(...))` to show a progress bar in the status bar during indexing
 - **Cannot run processes inside ReadAction**: completion handlers run under ReadAction, so process execution (artisan) must happen on a background thread. The service pre-caches results; the completion handler only reads the cached list
@@ -420,6 +426,7 @@ Rules:
 - **JDK 21 required** — set in `gradle.properties` as `javaVersion = 21`. The Gradle toolchain (`jvmToolchain(21)`) enforces this.
 - IntelliJ IDEA CE's bundled JBR (Java 25) is too new for the Gradle build. Install JDK 21 separately (e.g. via IntelliJ's File > Project Structure > SDKs > Download JDK).
 - Set `JAVA_HOME` when building from terminal: `export JAVA_HOME="/Users/$USER/Library/Java/JavaVirtualMachines/jbr-21.x.x/Contents/Home"`
+- **Development target is PhpStorm 2025.1** (`platformVersion = 2025.1` in `gradle.properties`). The `sinceBuildVersion = 242` keeps compatibility back to 2024.2, but the sandbox IDE and LSP features target 2025.1. Grammar-Kit does not yet work with PhpStorm 2026.1.
 - **PHP for Eloquent indexing**: the plugin finds PHP at Herd (`~/Library/Application Support/Herd/bin/php`), Homebrew (`/opt/homebrew/bin/php`), or system PATH. Herd paths contain spaces — `GeneralCommandLine` handles quoting automatically.
 
 ## Grammar and Parser Patterns
@@ -464,7 +471,7 @@ Every version bump must update all of the following:
 - Generated code: `src/main/gen/` (gitignored, regenerated on build)
 - Grammar sources: `grammars/Antlers.flex`, `grammars/Antlers.bnf`
 - Plugin manifest: `src/main/resources/META-INF/plugin.xml`
-- Optional dependency configs: `src/main/resources/META-INF/antlers-php.xml`, `antlers-lsp.xml`
+- Optional dependency config: `src/main/resources/META-INF/antlers-php.xml`
 - Color schemes: `src/main/resources/colorSchemes/`
 - Bundled LSP server: `src/main/resources/language-server/antlersls.js`
 - Intention descriptions: `src/main/resources/intentionDescriptions/`
