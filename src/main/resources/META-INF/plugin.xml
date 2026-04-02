@@ -72,6 +72,10 @@
             implementation="com.antlers.support.injection.AntlersAlpineAttributeInjector"/>
 
         <psi.referenceContributor
+            language="Antlers"
+            implementation="com.antlers.support.partials.AntlersPartialReferenceContributor"/>
+
+        <psi.referenceContributor
             language="JavaScript"
             implementation="com.antlers.support.injection.AntlersAlpineReferenceContributor"/>
 

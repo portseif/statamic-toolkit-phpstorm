@@ -1,5 +1,6 @@
 package com.antlers.support.editor
 
+import com.antlers.support.AntlersLanguage
 import com.antlers.support.injection.AntlersAlpineReferenceResolver
 import com.intellij.lang.injection.InjectedLanguageManager
 import com.intellij.lang.javascript.psi.JSReferenceExpression
@@ -34,29 +35,32 @@ class AntlersGotoDeclarationHandlerTest : BasePlatformTestCase() {
         assertEquals("selectGoal", reference!!.resolve()!!.text)
     }
 
-    fun testGotoDeclarationResolvesPartialToUnderscoredViewFile() {
+    fun testPartialPathResolvesThroughPsiReferenceWithoutLinkingTagOrBraces() {
         val partialFile = myFixture.addFileToProject(
             "resources/views/partials/components/_hero.antlers.html",
             "<section>{{ title }}</section>"
         )
 
+        val source = """
+            {{ partial:components/hero }}
+            """.trimIndent()
         myFixture.configureByText(
             "demo.antlers.html",
-            """
-            {{ partial:components/he<caret>ro }}
-            """.trimIndent()
+            source
         )
         PsiDocumentManager.getInstance(project).commitAllDocuments()
 
-        val offset = myFixture.editor.caretModel.offset
-        val sourceElement = myFixture.file.findElementAt(offset)
-            ?: error("Expected source element at offset $offset")
-        val targets = AntlersGotoDeclarationHandler()
-            .getGotoDeclarationTargets(sourceElement, offset, myFixture.editor)
+        val braceOffset = source.indexOf("{{") + 1
+        val tagOffset = source.indexOf("partial") + 1
+        val pathOffset = source.indexOf("components") + 1
 
-        assertNotNull("Expected goto declaration target for Antlers partial", targets)
-        assertEquals(1, targets!!.size)
-        assertEquals(partialFile.virtualFile.path, targets.single().containingFile.virtualFile.path)
+        assertNull("Expected no top-level reference on opening braces", myFixture.file.viewProvider.findReferenceAt(braceOffset))
+        assertNull("Expected no top-level reference on tag head", myFixture.file.viewProvider.findReferenceAt(tagOffset))
+
+        val reference = myFixture.file.viewProvider.findReferenceAt(pathOffset)
+        assertNotNull("Expected partial path PSI reference", reference)
+        assertEquals("components/hero", reference!!.canonicalText)
+        assertEquals(partialFile.virtualFile.path, reference.resolve()!!.containingFile.virtualFile.path)
     }
 
     fun testAlpineXForLoopVariablesResolveThroughPsiReference() {

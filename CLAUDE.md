@@ -20,6 +20,7 @@ This file provides guidance to Claude Code (`claude.ai/code`) when working in th
 ./gradlew buildPlugin    # Package plugin for distribution
 ./gradlew test           # Run tests (JUnit 4)
 ./gradlew test --tests com.antlers.support.formatting.AntlersFormattingPostProcessorTest  # Focused formatter regressions
+./gradlew test --tests com.antlers.support.statusbar.StatamicStatusBarWidgetFactoryTest    # Focused status widget regressions
 ```
 
 Grammar-Kit code generation from `.flex` and `.bnf` files runs automatically before compilation. There is no separate generation step.
@@ -300,12 +301,41 @@ Rules:
 - **Cannot run processes inside ReadAction**: completion handlers run under ReadAction, so process execution (artisan) must happen on a background thread. The service pre-caches results; the completion handler only reads the cached list
 - **PHP discovery**: checks Herd path (`~/Library/Application Support/Herd/bin/php`), Homebrew (`/opt/homebrew/bin/php`), and system PATH
 - **Auto-index**: optional file watcher via `VirtualFileManager.VFS_CHANGES` with 2-second debounce
+- **Last indexed timestamp**: `lastIndexedAtMillis` tracks the most recent successful READY transition. Update it only on successful indexing completion, and preserve it through `snapshotState()` / `restoreState()` and `setState()` change detection so the status widget can show a real relative “Last indexed …” line.
 
 ### Completion Auto-popup
 
 `AntlersCompletionContributor.invokeAutoPopup()` returns `true` for `:` so that typing `{{ partial:` or `{{ collection:` immediately shows the completion popup without requiring Ctrl+Space.
 
 ## IDE Integration Patterns
+
+### JetBrains UI and Copy References
+
+For plugin UI work, check the local JetBrains SDK summaries under `/Users/portseif/docs/` before inventing new Swing patterns or UI copy:
+
+- `/Users/portseif/docs/jetbrains-plugin-sdk-components.md`
+- `/Users/portseif/docs/jetbrains-plugin-sdk-settings-and-dialogs.md`
+- `/Users/portseif/docs/jetbrains-plugin-sdk-tool-windows-popups-and-status-bar.md`
+- `/Users/portseif/docs/jetbrains-plugin-sdk-writing-style.md`
+
+These are derived from the official JetBrains docs and should guide:
+
+- component choice
+- popup vs settings vs tool window decisions
+- settings page structure
+- status bar widget UI
+- capitalization, punctuation, and concise UI copy
+
+Practical defaults:
+
+- Use title capitalization for section headers, popup headers, and actions
+- Use sentence capitalization for checkbox labels, links, and helper text
+- Use `…` only for actions that open another dialog or require more input
+- Prefer standard JetBrains components and layout patterns over custom Swing styling
+- Use JetBrains spacing defaults instead of ad-hoc margins:
+  - inside a control: `6` vertical padding for separate controls and group labels, `8` for checkbox-style controls, `2` for hint text under a control
+  - inside a form: `20` between groups, `8` between unrelated settings, `0` between tightly related settings, `16` between settings on one line, `16` between a setting and an inline addition, `20` left inset for dependent controls, `60` between columns
+  - outer insets: `20` for main dialog/settings edges, `8` above footer areas, `20` left/right footer insets
 
 ### Settings
 
@@ -328,7 +358,7 @@ Settings are organized as nested sub-pages under Languages & Frameworks > Statam
 - **Navigation & Documentation** — partial nav, custom tag nav, hover docs
 - **Language Injection** — PHP, Alpine.js
 
-Each sub-page is a separate `Configurable` class registered in `plugin.xml` with `parentId="com.statamic.toolkit.settings"`. The parent `AntlersSettingsConfigurable` implements `SearchableConfigurable` and renders a landing page with clickable links to each child via `ShowSettingsUtil.getInstance().showSettingsDialog()`.
+Each sub-page is a separate `Configurable` class registered in `plugin.xml` with `parentId="com.statamic.toolkit.settings"`. The parent `AntlersSettingsConfigurable` implements `SearchableConfigurable` and should act as a lightweight overview page only. Do not build a second navigation system inside the page. Let the left Settings tree handle movement between child pages.
 
 **Important**: `Configurable.Composite` alone does NOT create tree children in IntelliJ. Each child must be explicitly registered as an `applicationConfigurable` in `plugin.xml` with the correct `parentId`.
 
@@ -377,9 +407,19 @@ Registered in plugin.xml with `<intentionAction>` and description resources in `
 
 ### Status Bar Widget
 
-`StatamicStatusBarWidgetFactory` creates a status bar icon that shows a custom popup on click (not an action menu — uses `JBPopupFactory.createComponentPopupBuilder()` with a `GridBagLayout` panel).
+`StatamicStatusBarWidgetFactory` creates a status bar icon that shows a custom popup on click (not an action menu — uses `JBPopupFactory.createComponentPopupBuilder()` with a custom Swing panel).
 
-The popup displays driver type, indexing status, resource counts with handles, an auto-index checkbox, and a refresh button. It uses `RelativePoint` to position above the status bar.
+The popup displays driver type, indexing status, Antlers LSP state, resource counts with handles, quick links, an auto-index checkbox, and a refresh action. It uses `RelativePoint` to position above the status bar.
+
+Rules:
+
+- Keep the popup lightweight. It is for status and quick navigation, not full configuration.
+- Use grouped sections such as `Connection`, `Resources`, and `Quick Links`.
+- Resource rows and quick links should use link-style controls, not button-styled rows.
+- The settings shortcut belongs in the popup's top-right corner as a compact utility action, not as a content row.
+- The settings shortcut is currently best implemented as a native `ActionToolbar` gear action in the `Connection` header row, not as a manually positioned Swing button.
+- Keep popup copy data-driven and compact. Empty-state copy and relative time text should come from small helper functions (for example, the resource empty-state and “Last indexed …” helpers) instead of being inlined throughout the panel builder.
+- If the popup keeps growing, move larger browsing workflows into Settings or a tool window instead of adding more density.
 
 ### Structure View Nesting
 

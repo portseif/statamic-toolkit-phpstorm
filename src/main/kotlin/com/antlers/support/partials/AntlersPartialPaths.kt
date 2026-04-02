@@ -3,6 +3,9 @@ package com.antlers.support.partials
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiManager
+import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.GlobalSearchScopesCore
 import java.nio.file.Path
@@ -45,6 +48,28 @@ object AntlersPartialPaths {
 
         return viewsRoot?.let { GlobalSearchScopesCore.directoryScope(project, it, true) }
             ?: GlobalSearchScope.projectScope(project)
+    }
+
+    fun matchingFiles(project: Project, partialPath: String): List<VirtualFile> {
+        val scope = searchScope(project)
+        val results = linkedSetOf<VirtualFile>()
+
+        for (fullFileName in candidateFileNames(partialPath)) {
+            val files = FilenameIndex.getVirtualFilesByName(fullFileName, scope)
+            for (file in files) {
+                if (matches(file, partialPath)) {
+                    results += file
+                }
+            }
+        }
+
+        return results.toList()
+    }
+
+    fun matchingPsiFiles(project: Project, partialPath: String): List<PsiFile> {
+        val psiManager = PsiManager.getInstance(project)
+        return matchingFiles(project, partialPath)
+            .mapNotNull(psiManager::findFile)
     }
 
     private fun extractLookupPaths(file: VirtualFile): Set<String> {

@@ -12,7 +12,13 @@ import com.antlers.support.statamic.entryFields
 import com.antlers.support.statamic.totalResources
 import com.intellij.ide.projectView.ProjectView
 import com.intellij.ide.projectView.impl.ProjectViewPane
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.ui.popup.JBPopup
@@ -24,6 +30,7 @@ import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
+import com.intellij.icons.AllIcons
 import com.intellij.util.Consumer
 import com.intellij.util.ui.JBUI
 import java.awt.*
@@ -87,7 +94,7 @@ private class StatamicStatusBarWidget(private val project: Project) :
         popup.show(RelativePoint(component, Point(0, -h)))
     }
 
-    private fun buildPopupPanel(): JPanel {
+    private fun buildPopupPanel(): JComponent {
         val svc = StatamicProjectCollections.getInstance(project)
         val idx = svc.index
         val dim = JBUI.CurrentTheme.Label.disabledForeground()
@@ -108,8 +115,15 @@ private class StatamicStatusBarWidget(private val project: Project) :
 
         val root = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = JBUI.Borders.empty(10, 12)
+            border = JBUI.Borders.empty(8, 12, 10, 12)
         }
+
+        val content = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+        }
+
+        val settingsToolbar = createSettingsToolbar(root)
 
         fun sectionTitle(text: String) = JBLabel(text).apply {
             font = baseFont.deriveFont(Font.BOLD, baseFont.size2D - 0.5f)
@@ -143,15 +157,21 @@ private class StatamicStatusBarWidget(private val project: Project) :
             }
         }
 
+        fun mutedInfoLine(text: String): JComponent = JBLabel(text).apply {
+            font = tinyFont
+            foreground = dim
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+
         val driverName = svc.driver.displayName()
 
         val resourceGroups = listOf(
-            StatusBarResourceGroup("Collections", "content/collections", idx.collections),
-            StatusBarResourceGroup("Navigations", "content/navigation", idx.navigations),
-            StatusBarResourceGroup("Taxonomies", "content/taxonomies", idx.taxonomies),
-            StatusBarResourceGroup("Global Sets", "content/globals", idx.globalSets),
-            StatusBarResourceGroup("Forms", "resources/forms", idx.forms),
-            StatusBarResourceGroup("Assets", "content/assets", idx.assetContainers)
+            StatusBarResourceGroup("Collections", "content/collections", idx.collections, "Open collection definitions"),
+            StatusBarResourceGroup("Navigations", "content/navigation", idx.navigations, "Open navigation definitions"),
+            StatusBarResourceGroup("Taxonomies", "content/taxonomies", idx.taxonomies, "Open taxonomy definitions"),
+            StatusBarResourceGroup("Global Sets", "content/globals", idx.globalSets, "Open global set definitions"),
+            StatusBarResourceGroup("Forms", "resources/forms", idx.forms, "Open form definitions"),
+            StatusBarResourceGroup("Assets", "content/assets", idx.assetContainers, "Open asset container definitions")
         )
         val visibleResourceGroups = resourceGroups.filter { it.items.isNotEmpty() }
         val totalResources = idx.totalResources()
@@ -170,7 +190,13 @@ private class StatamicStatusBarWidget(private val project: Project) :
         val connectionPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             alignmentX = Component.LEFT_ALIGNMENT
-            add(sectionTitle("Connection"))
+            add(JPanel(BorderLayout()).apply {
+                isOpaque = false
+                alignmentX = Component.LEFT_ALIGNMENT
+                maximumSize = Dimension(Int.MAX_VALUE, settingsToolbar.preferredSize.height)
+                add(sectionTitle("Connection"), BorderLayout.WEST)
+                add(settingsToolbar, BorderLayout.EAST)
+            })
             add(Box.createVerticalStrut(JBUI.scale(6)))
             add(JBLabel(driverName).apply {
                 font = boldFont
@@ -186,13 +212,19 @@ private class StatamicStatusBarWidget(private val project: Project) :
                     IndexingStatus.NOT_STARTED -> statusLine("Not indexed yet", dim)
                 }
             )
-            add(Box.createVerticalStrut(JBUI.scale(6)))
-            add(lspLine(lspStatus, soft, dim, success, warning, error, smallFont))
+            add(Box.createVerticalStrut(JBUI.scale(4)))
+            add(lspLine(lspStatus, soft, dim, success, warning, error, smallFont, tinyFont))
+            formatLastIndexedText(svc.lastIndexedAtMillis)?.let { lastIndexedText ->
+                add(Box.createVerticalStrut(JBUI.scale(2)))
+                add(mutedInfoLine(lastIndexedText).apply {
+                    toolTipText = "Updated after the most recent successful Statamic index"
+                })
+            }
         }
-        root.add(connectionPanel)
-        root.add(sectionSpacer())
-        root.add(separator())
-        root.add(sectionSpacer(8))
+        content.add(connectionPanel)
+        content.add(sectionSpacer())
+        content.add(separator())
+        content.add(sectionSpacer(8))
 
         val resourcesPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -207,6 +239,8 @@ private class StatamicStatusBarWidget(private val project: Project) :
                 alignmentX = Component.LEFT_ALIGNMENT
             }
 
+            val rowTooltip = group.toolTipText
+
             val topLine = JPanel(BorderLayout()).apply {
                 alignmentX = Component.LEFT_ALIGNMENT
                 isOpaque = false
@@ -214,7 +248,9 @@ private class StatamicStatusBarWidget(private val project: Project) :
                 add(JBLabel(group.items.size.toString()).apply {
                     font = tinyFont
                     foreground = soft
+                    toolTipText = rowTooltip
                 }, BorderLayout.EAST)
+                toolTipText = rowTooltip
             }
             row.add(topLine)
 
@@ -233,19 +269,15 @@ private class StatamicStatusBarWidget(private val project: Project) :
         }
 
         if (visibleResourceGroups.isEmpty()) {
-            resourcesPanel.add(JBLabel("No indexed resources yet").apply {
-                font = tinyFont
-                foreground = dim
-                alignmentX = Component.LEFT_ALIGNMENT
-            })
+            resourcesPanel.add(mutedInfoLine(resourcesEmptyStateText(svc.status, totalResources)))
         } else {
             visibleResourceGroups.forEach(::addResourceRow)
         }
 
-        root.add(resourcesPanel)
-        root.add(sectionSpacer(6))
-        root.add(separator())
-        root.add(sectionSpacer(8))
+        content.add(resourcesPanel)
+        content.add(sectionSpacer(6))
+        content.add(separator())
+        content.add(sectionSpacer(8))
 
         val quickLinksPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -259,6 +291,7 @@ private class StatamicStatusBarWidget(private val project: Project) :
                 label = "Views",
                 path = "resources/views",
                 description = "Open template directory",
+                toolTipText = "Open Statamic templates",
                 bright = bright,
                 dim = dim,
                 smallFont = smallFont,
@@ -266,10 +299,10 @@ private class StatamicStatusBarWidget(private val project: Project) :
             )
         )
 
-        root.add(quickLinksPanel)
-        root.add(sectionSpacer(6))
-        root.add(separator())
-        root.add(sectionSpacer(8))
+        content.add(quickLinksPanel)
+        content.add(sectionSpacer(6))
+        content.add(separator())
+        content.add(sectionSpacer(8))
 
         val checkbox = JBCheckBox("Auto-index").apply {
             font = smallFont
@@ -292,11 +325,13 @@ private class StatamicStatusBarWidget(private val project: Project) :
         }
 
         val footer = JPanel(BorderLayout()).apply {
+            isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
             add(checkbox, BorderLayout.WEST)
             add(refreshLink, BorderLayout.EAST)
         }
-        root.add(footer)
+        content.add(footer)
+        root.add(content)
 
         return root
     }
@@ -323,7 +358,8 @@ private class StatamicStatusBarWidget(private val project: Project) :
         success: Color,
         warning: Color,
         error: Color,
-        font: Font
+        font: Font,
+        labelFont: Font
     ): JPanel {
         val (label, color) = when (snapshot?.state) {
             AntlersLspConnectionState.CONNECTED -> snapshot.message to success
@@ -339,9 +375,9 @@ private class StatamicStatusBarWidget(private val project: Project) :
             isOpaque = false
             add(JBLabel("Antlers LSP").apply {
                 foreground = soft
-                this.font = font
+                this.font = labelFont
             })
-            add(Box.createHorizontalStrut(JBUI.scale(8)))
+            add(Box.createHorizontalStrut(JBUI.scale(6)))
             add(JBLabel(label).apply {
                 foreground = color
                 this.font = font
@@ -354,7 +390,8 @@ private class StatamicStatusBarWidget(private val project: Project) :
             label = group.label,
             path = group.path,
             foreground = foreground,
-            font = font
+            font = font,
+            toolTipText = group.toolTipText
         )
     }
 
@@ -362,6 +399,7 @@ private class StatamicStatusBarWidget(private val project: Project) :
         label: String,
         path: String,
         description: String,
+        toolTipText: String,
         bright: Color,
         dim: Color,
         smallFont: Font,
@@ -371,7 +409,7 @@ private class StatamicStatusBarWidget(private val project: Project) :
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             alignmentX = Component.LEFT_ALIGNMENT
 
-            add(createPathLink(label, path, bright, smallFont).apply {
+            add(createPathLink(label, path, bright, smallFont, toolTipText).apply {
                 alignmentX = Component.LEFT_ALIGNMENT
             })
 
@@ -379,7 +417,7 @@ private class StatamicStatusBarWidget(private val project: Project) :
                 font = tinyFont
                 foreground = dim
                 border = JBUI.Borders.empty(2, 0, 0, 0)
-                toolTipText = path
+                this.toolTipText = toolTipText
                 alignmentX = Component.LEFT_ALIGNMENT
             })
 
@@ -387,12 +425,19 @@ private class StatamicStatusBarWidget(private val project: Project) :
         }
     }
 
-    private fun createPathLink(label: String, path: String, foreground: Color, font: Font): JComponent {
+    private fun createPathLink(
+        label: String,
+        path: String,
+        foreground: Color,
+        font: Font,
+        toolTipText: String
+    ): JComponent {
         val target = findResourceDirectory(project, path)
         return if (target == null) {
             JBLabel(label).apply {
                 this.font = font
                 this.foreground = foreground
+                this.toolTipText = toolTipText
             }
         } else {
             ActionLink(label) {
@@ -400,8 +445,36 @@ private class StatamicStatusBarWidget(private val project: Project) :
                 SwingUtilities.getWindowAncestor(it.source as Component)?.dispose()
             }.apply {
                 this.font = font
-                toolTipText = "Open $path"
+                this.toolTipText = toolTipText
             }
+        }
+    }
+
+    private fun createSettingsToolbar(targetComponent: JComponent): JComponent {
+        val action = object : DumbAwareAction("Open Statamic Settings", null, AllIcons.General.GearPlain) {
+            override fun actionPerformed(e: AnActionEvent) {
+                ShowSettingsUtil.getInstance().showSettingsDialog(project, "com.statamic.toolkit.settings")
+                SwingUtilities.getWindowAncestor(targetComponent)?.dispose()
+            }
+        }
+
+        val toolbar = ActionManager.getInstance().createActionToolbar(
+            "StatamicStatusWidget",
+            DefaultActionGroup(action),
+            true
+        ).apply {
+            setLayoutPolicy(ActionToolbar.NOWRAP_LAYOUT_POLICY)
+            setTargetComponent(targetComponent)
+            setReservePlaceAutoPopupIcon(false)
+        }
+
+        return toolbar.component.apply {
+            isOpaque = false
+            border = JBUI.Borders.empty()
+            preferredSize = JBUI.size(24, 24)
+            minimumSize = preferredSize
+            maximumSize = preferredSize
+            toolTipText = "Open Statamic settings"
         }
     }
 }
@@ -409,7 +482,8 @@ private class StatamicStatusBarWidget(private val project: Project) :
 private data class StatusBarResourceGroup(
     val label: String,
     val path: String,
-    val items: List<String>
+    val items: List<String>,
+    val toolTipText: String
 )
 
 private fun createStatusDot(color: Color): JComponent {
@@ -491,4 +565,29 @@ private fun truncateStatusBarHandleText(text: String, maxLength: Int): String {
     if (text.length <= maxLength) return text
     if (maxLength <= 1) return "…"
     return text.take(maxLength - 1).trimEnd() + "…"
+}
+
+internal fun formatLastIndexedText(lastIndexedAtMillis: Long?, nowMillis: Long = System.currentTimeMillis()): String? {
+    if (lastIndexedAtMillis == null) return null
+
+    val elapsed = (nowMillis - lastIndexedAtMillis).coerceAtLeast(0L)
+    val relativeText = when {
+        elapsed < 60_000L -> "just now"
+        elapsed < 3_600_000L -> "${elapsed / 60_000L}m ago"
+        elapsed < 86_400_000L -> "${elapsed / 3_600_000L}h ago"
+        else -> "${elapsed / 86_400_000L}d ago"
+    }
+
+    return "Last indexed $relativeText"
+}
+
+internal fun resourcesEmptyStateText(status: IndexingStatus, totalResources: Int): String {
+    if (totalResources > 0) return ""
+
+    return when (status) {
+        IndexingStatus.INDEXING -> "Resources will appear when indexing finishes."
+        IndexingStatus.ERROR -> "Run Refresh to try indexing again."
+        IndexingStatus.READY -> "No Statamic resources found in this project."
+        IndexingStatus.NOT_STARTED -> "Run Refresh to index Statamic resources."
+    }
 }

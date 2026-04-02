@@ -57,6 +57,9 @@ class StatamicProjectCollections(private val project: Project) {
     @Volatile var currentStep: String = ""
         private set
 
+    @Volatile var lastIndexedAtMillis: Long? = null
+        private set
+
     @Volatile private var loaded = false
     @Volatile private var refreshInProgress = false
     @Volatile private var pendingRefresh = false
@@ -188,7 +191,8 @@ class StatamicProjectCollections(private val project: Project) {
                     index = nextIndex,
                     status = IndexingStatus.READY,
                     currentStep = "",
-                    statusMessage = nextIndex.readyStatusMessage()
+                    statusMessage = nextIndex.readyStatusMessage(),
+                    lastIndexedAtMillis = System.currentTimeMillis()
                 )
             } else {
                 setState(
@@ -252,7 +256,8 @@ class StatamicProjectCollections(private val project: Project) {
             index = nextIndex,
             status = IndexingStatus.READY,
             currentStep = "",
-            statusMessage = nextIndex.readyStatusMessage()
+            statusMessage = nextIndex.readyStatusMessage(),
+            lastIndexedAtMillis = System.currentTimeMillis()
         )
     }
 
@@ -379,7 +384,7 @@ class StatamicProjectCollections(private val project: Project) {
         listeners -= listener
     }
 
-    private fun snapshotState() = InternalState(index, driver, status, statusMessage, currentStep)
+    private fun snapshotState() = InternalState(index, driver, status, statusMessage, currentStep, lastIndexedAtMillis)
 
     private fun restoreState(state: InternalState) {
         setState(
@@ -387,7 +392,8 @@ class StatamicProjectCollections(private val project: Project) {
             driver = state.driver,
             status = state.status,
             statusMessage = state.statusMessage,
-            currentStep = state.currentStep
+            currentStep = state.currentStep,
+            lastIndexedAtMillis = state.lastIndexedAtMillis
         )
     }
 
@@ -396,19 +402,22 @@ class StatamicProjectCollections(private val project: Project) {
         driver: StatamicDriver = this.driver,
         status: IndexingStatus = this.status,
         statusMessage: String = this.statusMessage,
-        currentStep: String = this.currentStep
+        currentStep: String = this.currentStep,
+        lastIndexedAtMillis: Long? = this.lastIndexedAtMillis
     ) {
         val changed = this.index != index ||
             this.driver != driver ||
             this.status != status ||
             this.statusMessage != statusMessage ||
-            this.currentStep != currentStep
+            this.currentStep != currentStep ||
+            this.lastIndexedAtMillis != lastIndexedAtMillis
 
         this.index = index
         this.driver = driver
         this.status = status
         this.statusMessage = statusMessage
         this.currentStep = currentStep
+        this.lastIndexedAtMillis = lastIndexedAtMillis
 
         if (changed) {
             notifyListeners()
@@ -454,5 +463,6 @@ private data class InternalState(
     val driver: StatamicDriver,
     val status: IndexingStatus,
     val statusMessage: String,
-    val currentStep: String
+    val currentStep: String,
+    val lastIndexedAtMillis: Long?
 )

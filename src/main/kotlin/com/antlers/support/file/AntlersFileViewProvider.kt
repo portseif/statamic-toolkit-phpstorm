@@ -11,6 +11,7 @@ import com.intellij.psi.templateLanguages.TemplateDataElementType
 import com.intellij.psi.tree.OuterLanguageElementType
 import com.antlers.support.AntlersLanguage
 import com.antlers.support.lexer.AntlersTokenTypes
+import com.antlers.support.partials.AntlersPartialReferenceSupport
 import java.util.concurrent.ConcurrentHashMap
 
 class AntlersFileViewProvider(
@@ -65,6 +66,15 @@ class AntlersFileViewProvider(
         if (templateFile != null) {
             val ref = AbstractFileViewProvider.findReferenceAt(templateFile, offset)
             if (ref != null) return ref
+        }
+
+        val antlersFile = getPsi(baseLanguage)
+        if (antlersFile != null) {
+            val element = AbstractFileViewProvider.findElementAt(antlersFile, offset)
+            if (element != null) {
+                val partialReference = AntlersPartialReferenceSupport.referenceForElement(element)
+                if (partialReference != null) return partialReference
+            }
         }
         return super.findReferenceAt(offset)
     }

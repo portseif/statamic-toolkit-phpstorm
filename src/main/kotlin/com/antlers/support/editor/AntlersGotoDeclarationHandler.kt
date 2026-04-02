@@ -14,8 +14,6 @@ import com.intellij.psi.search.GlobalSearchScopesCore
 import com.intellij.psi.util.PsiTreeUtil
 import com.antlers.support.AntlersLanguage
 import com.antlers.support.actions.StatamicSnippetTemplates
-import com.antlers.support.lexer.AntlersTokenTypes
-import com.antlers.support.partials.AntlersPartialPaths
 import com.antlers.support.psi.AntlersModifier
 import com.antlers.support.psi.AntlersTagExpression
 import com.antlers.support.psi.AntlersTagName
@@ -44,21 +42,12 @@ class AntlersGotoDeclarationHandler : GotoDeclarationHandler {
         val antlersFile = viewProvider.getPsi(AntlersLanguage.INSTANCE) ?: return null
         val antlersElement = antlersFile.findElementAt(offset) ?: return null
 
-        // 1. Partial navigation
-        if (settings.enablePartialNavigation) {
-            val partialPath = resolvePartialPath(antlersElement)
-            if (partialPath != null) {
-                val targets = findPartialFiles(project, partialPath)
-                if (targets.isNotEmpty()) return targets.toTypedArray()
-            }
-        }
-
-        // 2. Custom tag navigation — Cmd-click tag name → app/Tags/ClassName.php
+        // 1. Custom tag navigation — Cmd-click tag name → app/Tags/ClassName.php
         if (settings.enableCustomTagNavigation) {
             val tagTargets = resolveCustomTag(antlersElement, project)
             if (tagTargets != null) return tagTargets.toTypedArray()
 
-            // 3. Custom modifier navigation — Cmd-click modifier name → app/Modifiers/ClassName.php
+            // 2. Custom modifier navigation — Cmd-click modifier name → app/Modifiers/ClassName.php
             val modTargets = resolveCustomModifier(antlersElement, project)
             if (modTargets != null) return modTargets.toTypedArray()
         }
@@ -73,79 +62,7 @@ class AntlersGotoDeclarationHandler : GotoDeclarationHandler {
     }
 
     // -------------------------------------------------------------------------
-    // Partial resolution (existing)
-    // -------------------------------------------------------------------------
-
-    private fun resolvePartialPath(element: PsiElement): String? {
-        val elementType = element.node?.elementType ?: return null
-
-        if (elementType != AntlersTokenTypes.IDENTIFIER &&
-            elementType != AntlersTokenTypes.COLON &&
-            elementType != AntlersTokenTypes.OP_DIVIDE
-        ) return null
-
-        return resolveFromSiblings(element)
-    }
-
-    private fun resolveFromSiblings(element: PsiElement): String? {
-        // Walk backwards to find the start of the tag expression
-        var current: PsiElement? = element
-        while (current?.prevSibling != null) {
-            val prev = current.prevSibling
-            val prevType = prev.node?.elementType
-            if (prevType == AntlersTokenTypes.IDENTIFIER ||
-                prevType == AntlersTokenTypes.COLON ||
-                prevType == AntlersTokenTypes.OP_DIVIDE
-            ) {
-                current = prev
-            } else {
-                break
-            }
-        }
-
-        // Collect the full expression forward
-        val expressionBuilder = StringBuilder()
-        var node: PsiElement? = current
-        while (node != null) {
-            val nodeType = node.node?.elementType
-            if (nodeType == AntlersTokenTypes.IDENTIFIER ||
-                nodeType == AntlersTokenTypes.COLON ||
-                nodeType == AntlersTokenTypes.OP_DIVIDE
-            ) {
-                expressionBuilder.append(node.text)
-                node = node.nextSibling
-            } else {
-                break
-            }
-        }
-
-        val expression = expressionBuilder.toString()
-
-        if (!expression.startsWith("partial:")) return null
-        val path = expression.removePrefix("partial:")
-        return if (path.isNotEmpty()) path else null
-    }
-
-    private fun findPartialFiles(project: Project, partialPath: String): List<PsiElement> {
-        val psiManager = PsiManager.getInstance(project)
-        val results = mutableListOf<PsiElement>()
-        val scope = AntlersPartialPaths.searchScope(project)
-
-        // Search by exact filename with path matching
-        for (fullFileName in AntlersPartialPaths.candidateFileNames(partialPath)) {
-            val files = FilenameIndex.getVirtualFilesByName(fullFileName, scope)
-            for (file in files) {
-                if (AntlersPartialPaths.matches(file, partialPath)) {
-                    psiManager.findFile(file)?.let { results.add(it) }
-                }
-            }
-        }
-
-        return results
-    }
-
-    // -------------------------------------------------------------------------
-    // Custom tag resolution (new)
+    // Custom tag resolution
     // -------------------------------------------------------------------------
 
     private fun resolveCustomTag(element: PsiElement, project: Project): List<PsiElement>? {
