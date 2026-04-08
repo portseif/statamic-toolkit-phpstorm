@@ -6,22 +6,29 @@ import com.antlers.support.statamic.StatamicProjectCollections
 import com.antlers.support.statamic.displayName
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.SearchableConfigurable
+import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.openapi.progress.ProgressManager.*
 import com.intellij.openapi.project.ProjectManager
-import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.TitledSeparator
+import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.Dimension
+import java.awt.FlowLayout
 import java.awt.Font
-import javax.swing.JButton
 import javax.swing.Box
 import javax.swing.BoxLayout
+import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
+import javax.swing.JSeparator
 import javax.swing.JTextArea
+import javax.swing.SwingConstants
 import javax.swing.Timer
 import javax.swing.UIManager
 
@@ -36,7 +43,7 @@ internal data class CheckboxField(
 )
 
 // ---------------------------------------------------------------------------
-// Root: Languages & Frameworks > Statamic  (parent, no own UI — just children)
+// Root: Languages & Frameworks > Statamic landing page
 // ---------------------------------------------------------------------------
 
 class AntlersSettingsConfigurable : SearchableConfigurable {
@@ -44,60 +51,55 @@ class AntlersSettingsConfigurable : SearchableConfigurable {
     override fun getDisplayName(): String = "Statamic"
 
     private val sections = listOf(
-        SettingSection("Data Source", "Indexing status, resources, and collection blueprint fields."),
-        SettingSection("Editor", "Typing, brace/quote auto-close, and semantic highlighting."),
-        SettingSection("Completion", "Tags, parameters, variables, and suggestion behavior."),
-        SettingSection("Navigation & Documentation", "Cmd+click navigation and Statamic hover docs."),
-        SettingSection("Language Injection", "Alpine.js and PHP injection toggles.")
+        "com.statamic.toolkit.settings.datasource" to "Data Source",
+        "com.statamic.toolkit.settings.editor" to "Editor",
+        "com.statamic.toolkit.settings.completion" to "Completion",
+        "com.statamic.toolkit.settings.navigation" to "Navigation & Documentation",
+        "com.statamic.toolkit.settings.injection" to "Language Injection",
     )
 
     override fun createComponent(): JComponent {
-        val baseFont = UIManager.getFont("Label.font")
-        val bright = JBUI.CurrentTheme.Label.foreground()
-        val dim = JBUI.CurrentTheme.Label.disabledForeground()
-        val titleFont = baseFont.deriveFont(Font.BOLD, baseFont.size2D + 1f)
-        val detailFont = baseFont.deriveFont(baseFont.size2D - 1f)
+        val dim = JBUI.CurrentTheme.Label.foreground()
 
-        val content = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = JBUI.Borders.empty(4, 0, 12, 0)
-        }
+        val builder = FormBuilder.createFormBuilder()
+            .addComponent(JBLabel(
+                "Configure Antlers language support, indexing, navigation, completion, and editor behavior."
+            ).apply {
+                foreground = dim
+                border = JBUI.Borders.emptyBottom(10)
+            })
 
-        content.add(JBLabel(
-            "<html><body style='width: 520px'>Configure Statamic Toolkit settings for Antlers language support, indexing, navigation, completion, and editor behavior.</body></html>"
-        ).apply {
-            foreground = bright
-            border = JBUI.Borders.emptyBottom(10)
-        })
-
-        content.add(JBLabel("Use the left sidebar to open a specific Statamic settings section.").apply {
-            foreground = dim
-            font = detailFont
-            border = JBUI.Borders.emptyBottom(12)
-        })
-        content.add(TitledSeparator("Sections"))
-
-        sections.forEachIndexed { index, section ->
-            content.add(JPanel().apply {
-                layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                alignmentX = JComponent.LEFT_ALIGNMENT
-                border = JBUI.Borders.empty(4, 8, if (index == sections.lastIndex) 0 else 10, 8)
-                add(JBLabel(section.title).apply {
-                    foreground = bright
-                    font = titleFont
-                    alignmentX = JComponent.LEFT_ALIGNMENT
-                })
-                add(Box.createVerticalStrut(JBUI.scale(2)))
-                add(JBLabel(section.description).apply {
-                    foreground = dim
-                    font = detailFont
-                    alignmentX = JComponent.LEFT_ALIGNMENT
-                })
-                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+        for ((id, title) in sections) {
+            builder.addComponent(ActionLink(title) {
+                val source = it.source as? Component ?: return@ActionLink
+                navigateToChild(source, id)
+            }.apply {
+                border = JBUI.Borders.empty(0, 24)
             })
         }
 
-        return content
+        return builder.addComponentFillVertically(JPanel(), 0).panel
+    }
+
+    /**
+     * Walks up the Swing hierarchy to find the SettingsEditor and selects a child configurable by ID.
+     */
+    private fun navigateToChild(source: Component, childId: String) {
+        var c: Component? = source
+        while (c != null) {
+            if (c is com.intellij.openapi.options.newEditor.SettingsEditor) {
+                // Find the configurable by visiting all registered configurables
+                val groups = com.intellij.openapi.options.ex.ConfigurableExtensionPointUtil.getConfigurableGroup(
+                    ProjectManager.getInstance().openProjects.firstOrNull(), true
+                )
+                val configurable = com.intellij.openapi.options.ex.ConfigurableVisitor.findById(
+                    childId, listOf(groups)
+                )
+                if (configurable != null) c.select(configurable)
+                return
+            }
+            c = c.parent
+        }
     }
 
     override fun isModified(): Boolean = false
@@ -115,6 +117,8 @@ class DataSourceConfigurable : Configurable {
     private var resourcesPanel: JPanel? = null
     private var entryFieldsPanel: JPanel? = null
     private var refreshButton: JButton? = null
+    private var convertToDbButton: JButton? = null
+    private var convertToFileButton: JButton? = null
     private var statusTimer: Timer? = null
 
     override fun getDisplayName(): String = "Data Source"
@@ -129,75 +133,55 @@ class DataSourceConfigurable : Configurable {
         driverValue = JBLabel("Detecting driver…").apply {
             font = titleFont
             foreground = bright
-            alignmentX = JComponent.LEFT_ALIGNMENT
         }
         statusValue = JBLabel("—").apply {
             font = detailFont
             foreground = dim
-            alignmentX = JComponent.LEFT_ALIGNMENT
         }
         resourcesPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            alignmentX = JComponent.LEFT_ALIGNMENT
         }
         entryFieldsPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            alignmentX = JComponent.LEFT_ALIGNMENT
         }
         refreshButton = JButton("Refresh").apply {
             addActionListener { refreshCollections() }
         }
 
-        val content = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = JBUI.Borders.empty(4, 0, 12, 0)
-        }
+        val statusRow = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0))
+        statusRow.add(statusValue)
+        statusRow.add(refreshButton)
 
-        content.add(TitledSeparator("Connection"))
-        content.add(driverValue)
-        content.add(Box.createVerticalStrut(JBUI.scale(4)))
-        content.add(statusValue)
-        content.add(Box.createVerticalStrut(JBUI.scale(14)))
-
-        content.add(TitledSeparator("Indexed Resources"))
-        content.add(JBLabel("Discovered handles from content, forms, globals, navigation, and assets.").apply {
-            foreground = dim
+        convertToDbButton = JButton("Convert to Database").apply {
             font = detailFont
-            border = JBUI.Borders.emptyBottom(8)
-            alignmentX = JComponent.LEFT_ALIGNMENT
-        })
-        content.add(resourcesPanel)
-        content.add(Box.createVerticalStrut(JBUI.scale(14)))
-
-        content.add(TitledSeparator("Collection Entry Fields"))
-        content.add(JBLabel("Blueprint fields available inside collection loops and entry contexts.").apply {
-            foreground = dim
+            addActionListener { runArtisanInTerminal("php please install:eloquent-driver") }
+        }
+        convertToFileButton = JButton("Export to Flat File").apply {
             font = detailFont
-            border = JBUI.Borders.emptyBottom(8)
-            alignmentX = JComponent.LEFT_ALIGNMENT
-        })
-        content.add(entryFieldsPanel)
-        content.add(Box.createVerticalStrut(JBUI.scale(14)))
-
-        val refreshRow = JPanel(BorderLayout()).apply {
-            alignmentX = JComponent.LEFT_ALIGNMENT
-            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
-            add(refreshButton)
+            addActionListener { runExportToFlatFile() }
         }
-        content.add(refreshRow)
-        content.add(Box.createVerticalGlue())
+        statusRow.add(convertToDbButton)
+        statusRow.add(convertToFileButton)
 
-        panel = JPanel(BorderLayout()).apply {
-            add(JBScrollPane(content).apply {
-                border = null
-                horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-            }, BorderLayout.CENTER)
-        }
+        val indent = JBUI.Borders.emptyLeft(20)
+
+        panel = FormBuilder.createFormBuilder()
+            .addComponent(TitledSeparator("Connection"))
+            .addComponent(driverValue!!.apply { border = indent })
+            .addComponent(statusRow.apply { border = indent })
+            .addVerticalGap(8)
+            .addComponent(TitledSeparator("Indexed Resources"))
+            .addComponent(resourcesPanel!!.apply { border = indent })
+            .addVerticalGap(8)
+            .addComponent(TitledSeparator("Collection Entry Fields"))
+            .addComponent(entryFieldsPanel!!.apply { border = indent })
+            .addComponentFillVertically(JPanel(), 0)
+            .panel
 
         updateStatus()
         statusTimer = Timer(1000) { updateStatus() }.apply { start() }
 
-        return panel!!
+        return panel!!.apply { border = JBUI.Borders.empty() }
     }
 
     private fun updateStatus() {
@@ -230,6 +214,10 @@ class DataSourceConfigurable : Configurable {
             statusTimer?.stop()
         }
         refreshButton?.isEnabled = service.status != IndexingStatus.INDEXING
+
+        // Show only the relevant convert button
+        convertToDbButton?.isVisible = service.driver == StatamicDriver.FLAT_FILE || service.driver == StatamicDriver.UNKNOWN
+        convertToFileButton?.isVisible = service.driver == StatamicDriver.ELOQUENT
     }
 
     private fun refreshCollections() {
@@ -237,6 +225,53 @@ class DataSourceConfigurable : Configurable {
         StatamicProjectCollections.getInstance(project).refresh()
         statusTimer?.stop()
         statusTimer = Timer(500) { updateStatus() }.apply { start() }
+    }
+
+    private fun runArtisanInTerminal(command: String) {
+        val project = ProjectManager.getInstance().openProjects.firstOrNull() ?: return
+        val basePath = project.basePath ?: return
+        val phpPath = StatamicProjectCollections.getInstance(project).findPhpPath() ?: "php"
+
+        getInstance().run(
+            object : com.intellij.openapi.progress.Task.Backgroundable(project, "Running: $command", false) {
+                override fun run(indicator: com.intellij.openapi.progress.ProgressIndicator) {
+                    indicator.text = command
+                    try {
+                        val cmd = com.intellij.execution.configurations.GeneralCommandLine("sh", "-c", command)
+                            .withWorkDirectory(basePath)
+                            .withEnvironment("PATH", "${java.io.File(phpPath).parent}:${System.getenv("PATH")}")
+                        val output = com.intellij.execution.process.ScriptRunnerUtil.getProcessOutput(cmd)
+                        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                            com.intellij.openapi.ui.Messages.showInfoMessage(
+                                project, output.take(2000).ifBlank { "Command completed." }, "Statamic"
+                            )
+                            refreshCollections()
+                        }
+                    } catch (e: Exception) {
+                        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                            com.intellij.openapi.ui.Messages.showErrorDialog(
+                                project, e.message ?: "Command failed.", "Statamic"
+                            )
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    private fun runExportToFlatFile() {
+        val commands = listOf(
+            "php please eloquent:export-collections",
+            "php please eloquent:export-entries",
+            "php please eloquent:export-blueprints",
+            "php please eloquent:export-forms",
+            "php please eloquent:export-globals",
+            "php please eloquent:export-navs",
+            "php please eloquent:export-taxonomies",
+            "php please eloquent:export-assets",
+            "php please eloquent:export-sites",
+        )
+        runArtisanInTerminal(commands.joinToString(" && "))
     }
 
     override fun disposeUIResources() { statusTimer?.stop(); statusTimer = null; panel = null }
@@ -260,7 +295,7 @@ class DataSourceConfigurable : Configurable {
             panel.add(createEmptySectionLabel("No indexed resources yet."))
         } else {
             resourceGroups.forEachIndexed { index, (label, items) ->
-                panel.add(createDataRow(label, items.size, wrapCommaSeparated(items)))
+                panel.add(createDataRow(label, items.size, items))
                 if (index != resourceGroups.lastIndex) {
                     panel.add(Box.createVerticalStrut(JBUI.scale(8)))
                 }
@@ -283,7 +318,7 @@ class DataSourceConfigurable : Configurable {
             panel.add(createEmptySectionLabel("No indexed collection fields yet."))
         } else {
             fieldGroups.forEachIndexed { idx, (collection, fields) ->
-                panel.add(createDataRow(collection, fields.size, wrapCommaSeparated(fields)))
+                panel.add(createDataRow(collection, fields.size, fields))
                 if (idx != fieldGroups.lastIndex) {
                     panel.add(Box.createVerticalStrut(JBUI.scale(8)))
                 }
@@ -294,54 +329,60 @@ class DataSourceConfigurable : Configurable {
         panel.repaint()
     }
 
-    private fun createDataRow(label: String, count: Int, detail: String): JComponent {
+    private fun createDataRow(label: String, count: Int, items: List<String>): JComponent {
         val bright = JBUI.CurrentTheme.Label.foreground()
         val dim = JBUI.CurrentTheme.Label.disabledForeground()
         val baseFont = UIManager.getFont("Label.font")
-        val titleFont = baseFont.deriveFont(Font.BOLD)
+        val titleFont = baseFont.deriveFont(Font.PLAIN)
         val detailFont = baseFont.deriveFont(baseFont.size2D - 1f)
 
         return JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            alignmentX = JComponent.LEFT_ALIGNMENT
 
-            add(JPanel(BorderLayout()).apply {
-                isOpaque = false
-                alignmentX = JComponent.LEFT_ALIGNMENT
-                add(JBLabel(label).apply {
-                    foreground = bright
-                    font = titleFont
-                }, BorderLayout.WEST)
-                add(JBLabel(count.toString()).apply {
-                    foreground = dim
-                    font = detailFont
-                }, BorderLayout.EAST)
-                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            // Header: "Collections (2)"
+            add(JBLabel("$label ($count)").apply {
+                foreground = bright
+                font = titleFont
+                alignmentX = Component.LEFT_ALIGNMENT
             })
 
-            add(createDetailArea(detail).apply {
-                border = JBUI.Borders.empty(2, 0, 0, 0)
-            })
-
-            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
-        }
-    }
-
-    private fun createDetailArea(text: String): JTextArea {
-        val dim = JBUI.CurrentTheme.Label.disabledForeground()
-        val baseFont = UIManager.getFont("Label.font")
-        return JTextArea(text).apply {
-            isEditable = false
-            isFocusable = false
-            lineWrap = true
-            wrapStyleWord = true
-            isOpaque = false
-            border = JBUI.Borders.empty()
-            foreground = dim
-            font = baseFont.deriveFont(baseFont.size2D - 1f)
-            columns = 58
-            alignmentX = JComponent.LEFT_ALIGNMENT
-            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            // Clickable inline items — click any name to copy to clipboard
+            if (items.isNotEmpty()) {
+                val itemsRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                    isOpaque = false
+                    alignmentX = Component.LEFT_ALIGNMENT
+                }
+                items.forEachIndexed { i, item ->
+                    itemsRow.add(JBLabel(item).apply {
+                        foreground = dim
+                        font = detailFont
+                        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                        toolTipText = "Click to copy '$item'"
+                        addMouseListener(object : java.awt.event.MouseAdapter() {
+                            override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                                val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                                clipboard.setContents(java.awt.datatransfer.StringSelection(item), null)
+                                val original = foreground
+                                foreground = JBUI.CurrentTheme.Link.Foreground.ENABLED
+                                javax.swing.Timer(600) { foreground = original }.apply { isRepeats = false; start() }
+                            }
+                            override fun mouseEntered(e: java.awt.event.MouseEvent) {
+                                foreground = JBUI.CurrentTheme.Link.Foreground.ENABLED
+                            }
+                            override fun mouseExited(e: java.awt.event.MouseEvent) {
+                                foreground = dim
+                            }
+                        })
+                    })
+                    if (i < items.lastIndex) {
+                        itemsRow.add(JBLabel(", ").apply {
+                            foreground = dim
+                            font = detailFont
+                        })
+                    }
+                }
+                add(itemsRow)
+            }
         }
     }
 
@@ -355,6 +396,7 @@ class DataSourceConfigurable : Configurable {
 }
 
 private data class SettingSection(
+    val id: String,
     val title: String,
     val description: String
 )

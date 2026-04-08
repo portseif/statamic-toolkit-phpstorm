@@ -100,6 +100,7 @@ Rules:
 - Cmd-click on Alpine method calls should resolve through normal PSI references first. `AntlersGotoDeclarationHandler` remains a fallback for Antlers-specific navigation such as partials.
 - `AntlersAlpineReferenceContributor` must stay cheap. Do not eagerly call the full resolver from `getReferencesByElement()`.
 - `AntlersAlpineReferenceResolver` caches the injected `x-data` object literal lookup per `XmlAttributeValue`. Do not re-materialize injected PSI while walking ancestors.
+- `AntlersAlpineXmlSuppressionProvider` suppresses false XML/HTML warnings on Alpine attributes. It handles multiple inspection IDs (`XmlUnboundNsPrefix`, `HtmlUnknownAttribute`, `HtmlUnknownTag`, `XmlUnresolvedReference`, `CheckTagEmptyBody`) and matches any attribute starting with `:`, `@`, or `x-`. When adding support for new Alpine-like attribute prefixes, update `isAlpineAttribute()` in this class.
 
 ### Auto-closing Delimiters
 
@@ -229,7 +230,7 @@ cp antlersls/server.js /path/to/antlers-support/src/main/resources/language-serv
 
 ### Semantic Highlighting
 
-`AntlersHighlightingAnnotator` colors all identifier parts within `AntlersTagName` nodes, not just the head. It uses `isTagLike()` to distinguish real tags (namespaced, parameterized, or closing) from simple variables like `{{ title }}`.
+`AntlersHighlightingAnnotator` colors all identifier parts within `AntlersTagName` nodes, not just the head. It uses `isTagLike()` to distinguish real tags (namespaced, parameterized, closing, or known block tags via `AntlersBlockTags.isBlockTag()`) from simple variables like `{{ title }}`.
 
 Partial paths (`partial:components/hero`) get the `TAG_PATH` text attribute which adds an underline effect, signaling they are navigable. The `:` and `/` separators within tag names are also colored.
 
@@ -300,6 +301,7 @@ Rules:
 - **Cannot run processes inside ReadAction**: completion handlers run under ReadAction, so process execution (artisan) must happen on a background thread. The service pre-caches results; the completion handler only reads the cached list
 - **PHP discovery**: checks Herd path (`~/Library/Application Support/Herd/bin/php`), Homebrew (`/opt/homebrew/bin/php`), and system PATH
 - **Auto-index**: optional file watcher via `VirtualFileManager.VFS_CHANGES` with 2-second debounce
+- **Storage conversion**: the Data Source settings page has contextual buttons — "Convert to Database" (runs `php please install:eloquent-driver`) when on flat-file, "Export to Flat File" (runs all `php please eloquent:export-*` commands) when on Eloquent. Commands run in a `Task.Backgroundable` with progress bar
 
 ### Completion Auto-popup
 
@@ -328,7 +330,9 @@ Settings are organized as nested sub-pages under Languages & Frameworks > Statam
 - **Navigation & Documentation** — partial nav, custom tag nav, hover docs
 - **Language Injection** — PHP, Alpine.js
 
-Each sub-page is a separate `Configurable` class registered in `plugin.xml` with `parentId="com.statamic.toolkit.settings"`. The parent `AntlersSettingsConfigurable` implements `SearchableConfigurable` and renders a landing page with clickable links to each child via `ShowSettingsUtil.getInstance().showSettingsDialog()`.
+Each sub-page is a separate `Configurable` class registered in `plugin.xml` with `parentId="com.statamic.toolkit.settings"`. The parent `AntlersSettingsConfigurable` implements `SearchableConfigurable` and renders a landing page with clickable links to each child.
+
+To navigate within the already-open settings dialog (not open a new one), walk up the Swing hierarchy to find `com.intellij.openapi.options.newEditor.SettingsEditor`, look up the target configurable via `ConfigurableVisitor.findById(id, listOf(group))` using `ConfigurableExtensionPointUtil.getConfigurableGroup()`, and call `editor.select(configurable)`. Do **not** use `ShowSettingsUtil.showSettingsDialog()` from within a settings page — it opens a second dialog.
 
 **Important**: `Configurable.Composite` alone does NOT create tree children in IntelliJ. Each child must be explicitly registered as an `applicationConfigurable` in `plugin.xml` with the correct `parentId`.
 
@@ -353,11 +357,12 @@ Project-aware menu visibility is handled by lightweight action groups such as `S
 
 ### Go-to Custom Tag/Modifier Definition
 
-`AntlersGotoDeclarationHandler` chains three resolution strategies in order:
+`AntlersGotoDeclarationHandler` chains two resolution strategies in order:
 
-1. **Partial navigation** — `partial:name` → view file (existing, guarded by `enablePartialNavigation`)
-2. **Custom tag navigation** — unknown tag name → `app/Tags/ClassName.php` (guarded by `enableCustomTagNavigation`)
-3. **Custom modifier navigation** — unknown modifier → `app/Modifiers/ClassName.php`
+1. **Custom tag navigation** — unknown tag name → `app/Tags/ClassName.php` (guarded by `enableCustomTagNavigation`)
+2. **Custom modifier navigation** — unknown modifier → `app/Modifiers/ClassName.php`
+
+Partial navigation (`partial:name` → view file) is handled by the Antlers LSP server, not the goto handler.
 
 Built-in Statamic tags (via `StatamicCatalog.isKnownTag()`) and block tags (via `AntlersBlockTags`) are skipped. Class name normalization uses `StatamicSnippetTemplates.normalizeTagClassName()` (same as the Statamic menu generators). File lookup uses `FilenameIndex` with a directory-scoped `GlobalSearchScope` limited to `app/Tags/` or `app/Modifiers/` for performance.
 

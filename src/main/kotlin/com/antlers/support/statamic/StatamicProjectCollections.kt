@@ -317,6 +317,8 @@ class StatamicProjectCollections(private val project: Project) {
         return result
     }
 
+    fun findPhpPath(): String? = findPhp()
+
     private fun findPhp(): String? {
         val user = System.getProperty("user.name")
         val candidates = listOf(

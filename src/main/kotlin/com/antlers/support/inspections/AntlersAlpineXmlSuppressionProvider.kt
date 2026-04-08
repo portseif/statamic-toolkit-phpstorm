@@ -13,32 +13,37 @@ class AntlersAlpineXmlSuppressionProvider : XmlSuppressionProvider() {
     }
 
     override fun isSuppressedFor(element: PsiElement, toolId: String): Boolean {
-        if (toolId != XML_UNBOUND_NS_PREFIX_INSPECTION_ID) return false
+        if (toolId !in SUPPRESSED_INSPECTION_IDS) return false
         if (!isProviderAvailable(element.containingFile ?: return false)) return false
 
         val attribute = PsiTreeUtil.getParentOfType(element, XmlAttribute::class.java, false)
             ?: (element as? XmlAttribute)
             ?: return false
 
-        return isAlpinePseudoNamespaceAttribute(attribute.name)
+        return isAlpineAttribute(attribute.name)
     }
 
     override fun suppressForFile(element: PsiElement, toolId: String) = Unit
 
     override fun suppressForTag(element: PsiElement, toolId: String) = Unit
 
-    private fun isAlpinePseudoNamespaceAttribute(attributeName: String): Boolean {
-        val prefix = attributeName.substringBefore(':', missingDelimiterValue = "")
-        return prefix in ALPINE_PSEUDO_NAMESPACE_PREFIXES
+    private fun isAlpineAttribute(attributeName: String): Boolean {
+        // Shorthand : and @ prefixes (e.g. :style, :class, :key, @click, @submit)
+        if (attributeName.startsWith(":") || attributeName.startsWith("@")) return true
+
+        // Any x- prefixed attribute (x-data, x-show, x-bind:foo, x-on:click, x-transition:enter, etc.)
+        if (attributeName.startsWith("x-")) return true
+
+        return false
     }
 
     private companion object {
-        const val XML_UNBOUND_NS_PREFIX_INSPECTION_ID = "XmlUnboundNsPrefix"
-
-        val ALPINE_PSEUDO_NAMESPACE_PREFIXES = setOf(
-            "x-bind",
-            "x-on",
-            "x-transition"
+        val SUPPRESSED_INSPECTION_IDS = setOf(
+            "XmlUnboundNsPrefix",
+            "HtmlUnknownAttribute",
+            "HtmlUnknownTag",
+            "XmlUnresolvedReference",
+            "CheckTagEmptyBody",
         )
     }
 }

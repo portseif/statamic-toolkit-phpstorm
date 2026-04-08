@@ -193,32 +193,28 @@
             parentId="language"
             instance="com.antlers.support.settings.AntlersSettingsConfigurable"
             id="com.statamic.toolkit.settings"
-            displayName="Statamic"/>
-        <applicationConfigurable
-            parentId="com.statamic.toolkit.settings"
-            instance="com.antlers.support.settings.DataSourceConfigurable"
-            id="com.statamic.toolkit.settings.datasource"
-            displayName="Data Source"/>
-        <applicationConfigurable
-            parentId="com.statamic.toolkit.settings"
-            instance="com.antlers.support.settings.EditorConfigurable"
-            id="com.statamic.toolkit.settings.editor"
-            displayName="Editor"/>
-        <applicationConfigurable
-            parentId="com.statamic.toolkit.settings"
-            instance="com.antlers.support.settings.CompletionConfigurable"
-            id="com.statamic.toolkit.settings.completion"
-            displayName="Completion"/>
-        <applicationConfigurable
-            parentId="com.statamic.toolkit.settings"
-            instance="com.antlers.support.settings.NavigationConfigurable"
-            id="com.statamic.toolkit.settings.navigation"
-            displayName="Navigation &amp; Documentation"/>
-        <applicationConfigurable
-            parentId="com.statamic.toolkit.settings"
-            instance="com.antlers.support.settings.InjectionConfigurable"
-            id="com.statamic.toolkit.settings.injection"
-            displayName="Language Injection"/>
+            displayName="Statamic">
+            <configurable
+                instance="com.antlers.support.settings.DataSourceConfigurable"
+                id="com.statamic.toolkit.settings.datasource"
+                displayName="Data Source"/>
+            <configurable
+                instance="com.antlers.support.settings.EditorConfigurable"
+                id="com.statamic.toolkit.settings.editor"
+                displayName="Editor"/>
+            <configurable
+                instance="com.antlers.support.settings.CompletionConfigurable"
+                id="com.statamic.toolkit.settings.completion"
+                displayName="Completion"/>
+            <configurable
+                instance="com.antlers.support.settings.NavigationConfigurable"
+                id="com.statamic.toolkit.settings.navigation"
+                displayName="Navigation &amp; Documentation"/>
+            <configurable
+                instance="com.antlers.support.settings.InjectionConfigurable"
+                id="com.statamic.toolkit.settings.injection"
+                displayName="Language Injection"/>
+        </applicationConfigurable>
 
         <applicationService
             serviceImplementation="com.antlers.support.settings.AntlersSettings"/>

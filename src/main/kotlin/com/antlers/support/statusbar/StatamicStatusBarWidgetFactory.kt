@@ -5,6 +5,7 @@ import com.antlers.support.lsp.AntlersLspConnectionState
 import com.antlers.support.lsp.AntlersLspStatusService
 import com.antlers.support.lsp.AntlersLspStatusSnapshot
 import com.antlers.support.settings.AntlersSettings
+import com.antlers.support.settings.AntlersSettingsConfigurable
 import com.antlers.support.statamic.IndexingStatus
 import com.antlers.support.statamic.StatamicProjectCollections
 import com.antlers.support.statamic.displayName
@@ -112,6 +113,7 @@ private class StatamicStatusBarWidget(private val project: Project) :
         val tinyFont = baseFont.deriveFont(baseFont.size2D - 2f)
         val boldFont = baseFont.deriveFont(Font.BOLD, baseFont.size2D + 1f)
         val lspStatus = project.getService(AntlersLspStatusService::class.java)?.snapshot()
+        val settingsButtonRightNudge = JBUI.scale(2)
 
         val root = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -193,6 +195,7 @@ private class StatamicStatusBarWidget(private val project: Project) :
             add(JPanel(BorderLayout()).apply {
                 isOpaque = false
                 alignmentX = Component.LEFT_ALIGNMENT
+                border = JBUI.Borders.empty(0, 0, 0, -settingsButtonRightNudge)
                 maximumSize = Dimension(Int.MAX_VALUE, settingsToolbar.preferredSize.height)
                 add(sectionTitle("Connection"), BorderLayout.WEST)
                 add(settingsToolbar, BorderLayout.EAST)
@@ -212,8 +215,6 @@ private class StatamicStatusBarWidget(private val project: Project) :
                     IndexingStatus.NOT_STARTED -> statusLine("Not indexed yet", dim)
                 }
             )
-            add(Box.createVerticalStrut(JBUI.scale(4)))
-            add(lspLine(lspStatus, soft, dim, success, warning, error, smallFont, tinyFont))
             formatLastIndexedText(svc.lastIndexedAtMillis)?.let { lastIndexedText ->
                 add(Box.createVerticalStrut(JBUI.scale(2)))
                 add(mutedInfoLine(lastIndexedText).apply {
@@ -254,18 +255,45 @@ private class StatamicStatusBarWidget(private val project: Project) :
             }
             row.add(topLine)
 
-            row.add(JBLabel(summarizeStatusBarHandles(group.items)).apply {
-                font = tinyFont
-                foreground = dim
-                border = JBUI.Borders.empty(2, 0, 0, 0)
-                toolTipText = group.items.joinToString(", ")
+            val handlesRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                isOpaque = false
                 alignmentX = Component.LEFT_ALIGNMENT
-            })
+            }
+            group.items.forEachIndexed { i, item ->
+                handlesRow.add(JBLabel(item).apply {
+                    font = tinyFont
+                    foreground = dim
+                    cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                    toolTipText = "Click to copy '$item'"
+                    addMouseListener(object : java.awt.event.MouseAdapter() {
+                        override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                            java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                                .setContents(java.awt.datatransfer.StringSelection(item), null)
+                            val orig = foreground
+                            foreground = JBUI.CurrentTheme.Link.Foreground.ENABLED
+                            javax.swing.Timer(600) { foreground = orig }.apply { isRepeats = false; start() }
+                        }
+                        override fun mouseEntered(e: java.awt.event.MouseEvent) {
+                            foreground = JBUI.CurrentTheme.Link.Foreground.ENABLED
+                        }
+                        override fun mouseExited(e: java.awt.event.MouseEvent) {
+                            foreground = dim
+                        }
+                    })
+                })
+                if (i < group.items.lastIndex) {
+                    handlesRow.add(JBLabel(", ").apply {
+                        font = tinyFont
+                        foreground = dim
+                    })
+                }
+            }
+            row.add(handlesRow)
 
             row.maximumSize = Dimension(Int.MAX_VALUE, row.preferredSize.height)
 
             resourcesPanel.add(row)
-            resourcesPanel.add(Box.createVerticalStrut(JBUI.scale(6)))
+            resourcesPanel.add(Box.createVerticalStrut(JBUI.scale(10)))
         }
 
         if (visibleResourceGroups.isEmpty()) {
@@ -416,7 +444,7 @@ private class StatamicStatusBarWidget(private val project: Project) :
             add(JBLabel(description).apply {
                 font = tinyFont
                 foreground = dim
-                border = JBUI.Borders.empty(2, 0, 0, 0)
+                border = JBUI.Borders.emptyTop(2)
                 this.toolTipText = toolTipText
                 alignmentX = Component.LEFT_ALIGNMENT
             })
@@ -451,9 +479,11 @@ private class StatamicStatusBarWidget(private val project: Project) :
     }
 
     private fun createSettingsToolbar(targetComponent: JComponent): JComponent {
-        val action = object : DumbAwareAction("Open Statamic Settings", null, AllIcons.General.GearPlain) {
+        val action = object : DumbAwareAction("Open Statamic settings", null, AllIcons.General.GearPlain) {
             override fun actionPerformed(e: AnActionEvent) {
-                ShowSettingsUtil.getInstance().showSettingsDialog(project, "com.statamic.toolkit.settings")
+                ShowSettingsUtil.getInstance().showSettingsDialog(
+                    project, AntlersSettingsConfigurable::class.java
+                )
                 SwingUtilities.getWindowAncestor(targetComponent)?.dispose()
             }
         }
@@ -465,7 +495,7 @@ private class StatamicStatusBarWidget(private val project: Project) :
         ).apply {
             setLayoutPolicy(ActionToolbar.NOWRAP_LAYOUT_POLICY)
             setTargetComponent(targetComponent)
-            setReservePlaceAutoPopupIcon(false)
+            isReservePlaceAutoPopupIcon = false
         }
 
         return toolbar.component.apply {
@@ -493,7 +523,7 @@ private fun createStatusDot(color: Color): JComponent {
             preferredSize = Dimension(diameter, diameter)
             minimumSize = preferredSize
             maximumSize = preferredSize
-            alignmentY = Component.CENTER_ALIGNMENT
+            alignmentY = CENTER_ALIGNMENT
             isOpaque = false
         }
 
