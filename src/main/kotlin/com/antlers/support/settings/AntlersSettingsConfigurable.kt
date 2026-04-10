@@ -342,8 +342,14 @@ class DataSourceConfigurable : Configurable {
             project = project,
             request = request.copy(conflictResolution = selectedResolution),
             service = conversionService,
-        ) {
+        ) { result ->
             setConvertButtonsEnabled(true)
+            if (result.success) {
+                val newDriver = target.driver
+                driverValue?.text = newDriver.displayName()
+                convertToDbButton?.isVisible = newDriver == StatamicDriver.FLAT_FILE
+                convertToFileButton?.isVisible = newDriver == StatamicDriver.ELOQUENT
+            }
             refreshCollections()
             updateStatus()
         }.show()
