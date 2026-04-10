@@ -1,24 +1,32 @@
 package com.antlers.support.settings
 
 import com.antlers.support.statamic.IndexingStatus
+import com.antlers.support.statamic.StorageConversionRequest
+import com.antlers.support.statamic.StorageConversionTarget
 import com.antlers.support.statamic.StatamicDriver
 import com.antlers.support.statamic.StatamicProjectCollections
+import com.antlers.support.statamic.StatamicStorageConversionService
 import com.antlers.support.statamic.displayName
+import com.antlers.support.statamic.DatabaseConnectionConfig
+import com.antlers.support.statamic.formatStorageSize
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.SearchableConfigurable
 import com.intellij.openapi.options.ShowSettingsUtil
-import com.intellij.openapi.progress.ProgressManager.*
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.ui.DialogWrapper
+import java.io.File
+import javax.swing.JLabel
+import javax.swing.JPasswordField
+import javax.swing.JTextField
 import com.intellij.ui.TitledSeparator
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
-import java.awt.BorderLayout
 import java.awt.Component
-import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
 import javax.swing.Box
@@ -26,9 +34,6 @@ import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
-import javax.swing.JSeparator
-import javax.swing.JTextArea
-import javax.swing.SwingConstants
 import javax.swing.Timer
 import javax.swing.UIManager
 
@@ -114,6 +119,9 @@ class DataSourceConfigurable : Configurable {
     private var panel: JPanel? = null
     private var driverValue: JBLabel? = null
     private var statusValue: JBLabel? = null
+    private var locationValue: JBLabel? = null
+    private var sizeValue: JBLabel? = null
+    private var recordsValue: JBLabel? = null
     private var resourcesPanel: JPanel? = null
     private var entryFieldsPanel: JPanel? = null
     private var refreshButton: JButton? = null
@@ -138,6 +146,18 @@ class DataSourceConfigurable : Configurable {
             font = detailFont
             foreground = dim
         }
+        locationValue = JBLabel("—").apply {
+            font = detailFont
+            foreground = dim
+        }
+        sizeValue = JBLabel("—").apply {
+            font = detailFont
+            foreground = dim
+        }
+        recordsValue = JBLabel("—").apply {
+            font = detailFont
+            foreground = dim
+        }
         resourcesPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
         }
@@ -152,11 +172,11 @@ class DataSourceConfigurable : Configurable {
         statusRow.add(statusValue)
         statusRow.add(refreshButton)
 
-        convertToDbButton = JButton("Convert to Database").apply {
+        convertToDbButton = JButton("Convert to database").apply {
             font = detailFont
-            addActionListener { runArtisanInTerminal("php please install:eloquent-driver") }
+            addActionListener { showConvertToDatabaseDialog() }
         }
-        convertToFileButton = JButton("Export to Flat File").apply {
+        convertToFileButton = JButton("Convert to flat file").apply {
             font = detailFont
             addActionListener { runExportToFlatFile() }
         }
@@ -170,10 +190,13 @@ class DataSourceConfigurable : Configurable {
             .addComponent(driverValue!!.apply { border = indent })
             .addComponent(statusRow.apply { border = indent })
             .addVerticalGap(8)
-            .addComponent(TitledSeparator("Indexed Resources"))
+            .addComponent(TitledSeparator("Storage details"))
+            .addComponent(createStorageDetailsPanel(indent))
+            .addVerticalGap(8)
+            .addComponent(TitledSeparator("Indexed resources"))
             .addComponent(resourcesPanel!!.apply { border = indent })
             .addVerticalGap(8)
-            .addComponent(TitledSeparator("Collection Entry Fields"))
+            .addComponent(TitledSeparator("Collection entry fields"))
             .addComponent(entryFieldsPanel!!.apply { border = indent })
             .addComponentFillVertically(JPanel(), 0)
             .panel
@@ -187,6 +210,7 @@ class DataSourceConfigurable : Configurable {
     private fun updateStatus() {
         val project = ProjectManager.getInstance().openProjects.firstOrNull() ?: return
         val service = StatamicProjectCollections.getInstance(project)
+        val conversionService = StatamicStorageConversionService.getInstance(project)
 
         driverValue?.text = if (service.driver == StatamicDriver.UNKNOWN) {
             "not detected"
@@ -209,6 +233,7 @@ class DataSourceConfigurable : Configurable {
         val idx = service.index
         rebuildResourcesPanel(idx)
         rebuildEntryFieldsPanel(idx)
+        updateStorageOverview(conversionService)
 
         if (service.status == IndexingStatus.READY || service.status == IndexingStatus.ERROR) {
             statusTimer?.stop()
@@ -227,51 +252,114 @@ class DataSourceConfigurable : Configurable {
         statusTimer = Timer(500) { updateStatus() }.apply { start() }
     }
 
-    private fun runArtisanInTerminal(command: String) {
-        val project = ProjectManager.getInstance().openProjects.firstOrNull() ?: return
-        val basePath = project.basePath ?: return
-        val phpPath = StatamicProjectCollections.getInstance(project).findPhpPath() ?: "php"
+    private fun setConvertButtonsEnabled(enabled: Boolean) {
+        convertToDbButton?.isEnabled = enabled
+        convertToFileButton?.isEnabled = enabled
+    }
 
-        getInstance().run(
-            object : com.intellij.openapi.progress.Task.Backgroundable(project, "Running: $command", false) {
-                override fun run(indicator: com.intellij.openapi.progress.ProgressIndicator) {
-                    indicator.text = command
-                    try {
-                        val cmd = com.intellij.execution.configurations.GeneralCommandLine("sh", "-c", command)
-                            .withWorkDirectory(basePath)
-                            .withEnvironment("PATH", "${java.io.File(phpPath).parent}:${System.getenv("PATH")}")
-                        val output = com.intellij.execution.process.ScriptRunnerUtil.getProcessOutput(cmd)
-                        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
-                            com.intellij.openapi.ui.Messages.showInfoMessage(
-                                project, output.take(2000).ifBlank { "Command completed." }, "Statamic"
-                            )
-                            refreshCollections()
-                        }
-                    } catch (e: Exception) {
-                        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
-                            com.intellij.openapi.ui.Messages.showErrorDialog(
-                                project, e.message ?: "Command failed.", "Statamic"
-                            )
-                        }
-                    }
-                }
-            }
-        )
+    private fun updateStorageOverview(conversionService: StatamicStorageConversionService) {
+        val snapshot = conversionService.currentStorageOverview()
+        locationValue?.text = snapshot?.locationDescription ?: "—"
+        sizeValue?.text = snapshot?.sizeBytes?.let(::formatStorageSize) ?: "—"
+        recordsValue?.text = snapshot?.totalRecords?.toString() ?: "—"
     }
 
     private fun runExportToFlatFile() {
-        val commands = listOf(
-            "php please eloquent:export-collections",
-            "php please eloquent:export-entries",
-            "php please eloquent:export-blueprints",
-            "php please eloquent:export-forms",
-            "php please eloquent:export-globals",
-            "php please eloquent:export-navs",
-            "php please eloquent:export-taxonomies",
-            "php please eloquent:export-assets",
-            "php please eloquent:export-sites",
+        startConversion(
+            target = StorageConversionTarget.FLAT_FILE,
+            databaseConfig = null,
         )
-        runArtisanInTerminal(commands.joinToString(" && "))
+    }
+
+    private fun showConvertToDatabaseDialog() {
+        val project = currentProject() ?: return
+        val basePath = project.basePath ?: return
+        val envFile = File(basePath, ".env")
+        val envValues = parseEnvFile(envFile)
+
+        val dialog = DatabaseConfigDialog(
+            dbConnection = envValues["DB_CONNECTION"] ?: "mysql",
+            dbHost = envValues["DB_HOST"] ?: "127.0.0.1",
+            dbPort = envValues["DB_PORT"] ?: "3306",
+            dbDatabase = envValues["DB_DATABASE"] ?: "laravel",
+            dbUsername = envValues["DB_USERNAME"] ?: "root",
+            dbPassword = envValues["DB_PASSWORD"] ?: "",
+        )
+
+        if (!dialog.showAndGet()) return
+
+        startConversion(
+            target = StorageConversionTarget.DATABASE,
+            databaseConfig = DatabaseConnectionConfig(
+                connection = dialog.connectionField.text.trim(),
+                host = dialog.hostField.text.trim(),
+                port = dialog.portField.text.trim(),
+                database = dialog.databaseField.text.trim(),
+                username = dialog.usernameField.text.trim(),
+                password = String(dialog.passwordField.password),
+            ),
+        )
+    }
+
+    private fun startConversion(
+        target: StorageConversionTarget,
+        databaseConfig: DatabaseConnectionConfig?,
+    ) {
+        val project = currentProject() ?: return
+        val conversionService = StatamicStorageConversionService.getInstance(project)
+        val request = StorageConversionRequest(
+            target = target,
+            databaseConfig = databaseConfig,
+        )
+        val analysis = try {
+            conversionService.analyze(request)
+        } catch (t: Throwable) {
+            Messages.showErrorDialog(
+                project,
+                t.message ?: "Unable to analyze the requested storage conversion.",
+                "Storage conversion failed"
+            )
+            return
+        }
+        if (analysis.errors.isNotEmpty()) {
+            Messages.showErrorDialog(
+                project,
+                analysis.errors.joinToString("\n\n"),
+                "Storage conversion blocked"
+            )
+            return
+        }
+
+        val confirmationDialog = StorageConversionConfirmationDialog(analysis)
+        if (!confirmationDialog.showAndGet()) return
+        val selectedResolution = confirmationDialog.selectedResolution
+        if (selectedResolution == com.antlers.support.statamic.StorageConflictResolution.CANCEL && analysis.hasConflict) {
+            return
+        }
+
+        setConvertButtonsEnabled(false)
+        StorageConversionProgressDialog(
+            project = project,
+            request = request.copy(conflictResolution = selectedResolution),
+            service = conversionService,
+        ) {
+            setConvertButtonsEnabled(true)
+            refreshCollections()
+            updateStatus()
+        }.show()
+    }
+
+    private fun currentProject(): Project? = ProjectManager.getInstance().openProjects.firstOrNull()
+
+    private fun parseEnvFile(envFile: File): Map<String, String> {
+        if (!envFile.exists()) return emptyMap()
+        return envFile.readLines()
+            .filter { it.contains('=') && !it.trimStart().startsWith('#') }
+            .associate { line ->
+                val key = line.substringBefore('=').trim()
+                val value = line.substringAfter('=').trim().removeSurrounding("\"")
+                key to value
+            }
     }
 
     override fun disposeUIResources() { statusTimer?.stop(); statusTimer = null; panel = null }
@@ -286,9 +374,9 @@ class DataSourceConfigurable : Configurable {
             "Collections" to index.collections,
             "Navigations" to index.navigations,
             "Taxonomies" to index.taxonomies,
-            "Global Sets" to index.globalSets,
+            "Global sets" to index.globalSets,
             "Forms" to index.forms,
-            "Asset Containers" to index.assetContainers,
+            "Asset containers" to index.assetContainers,
         ).filter { it.second.isNotEmpty() }
 
         if (resourceGroups.isEmpty()) {
@@ -393,6 +481,54 @@ class DataSourceConfigurable : Configurable {
             alignmentX = JComponent.LEFT_ALIGNMENT
         }
     }
+
+    private fun createStorageDetailsPanel(indent: javax.swing.border.Border): JComponent {
+        return FormBuilder.createFormBuilder()
+            .addLabeledComponent(JBLabel("Location:"), locationValue!!.apply { border = indent })
+            .addLabeledComponent(JBLabel("Size:"), sizeValue!!.apply { border = indent })
+            .addLabeledComponent(JBLabel("Tracked records:"), recordsValue!!.apply { border = indent })
+            .panel
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Database configuration dialog for "Convert to Database"
+// ---------------------------------------------------------------------------
+
+private class DatabaseConfigDialog(
+    dbConnection: String,
+    dbHost: String,
+    dbPort: String,
+    dbDatabase: String,
+    dbUsername: String,
+    dbPassword: String,
+) : DialogWrapper(true) {
+
+    val connectionField = JTextField(dbConnection, 20)
+    val hostField = JTextField(dbHost, 20)
+    val portField = JTextField(dbPort, 20)
+    val databaseField = JTextField(dbDatabase, 20)
+    val usernameField = JTextField(dbUsername, 20)
+    val passwordField = JPasswordField(dbPassword, 20)
+
+    init {
+        title = "Configure Database Connection"
+        setOKButtonText("Convert")
+        init()
+    }
+
+    override fun createCenterPanel(): JComponent {
+        return FormBuilder.createFormBuilder()
+            .addLabeledComponent(JLabel("Connection:"), connectionField)
+            .addLabeledComponent(JLabel("Host:"), hostField)
+            .addLabeledComponent(JLabel("Port:"), portField)
+            .addLabeledComponent(JLabel("Database:"), databaseField)
+            .addLabeledComponent(JLabel("Username:"), usernameField)
+            .addLabeledComponent(JLabel("Password:"), passwordField)
+            .panel
+    }
+
+    override fun getPreferredFocusedComponent(): JComponent = databaseField
 }
 
 private data class SettingSection(

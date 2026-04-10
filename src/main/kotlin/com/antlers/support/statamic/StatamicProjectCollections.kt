@@ -4,6 +4,7 @@ import com.antlers.support.settings.AntlersSettings
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.ScriptRunnerUtil
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.progress.ProgressIndicator
@@ -435,10 +436,10 @@ class StatamicProjectCollections(private val project: Project) {
             return
         }
 
-        application.invokeLater {
+        application.invokeLater({
             if (project.isDisposed) return@invokeLater
             listeners.forEach(Runnable::run)
-        }
+        }, ModalityState.any())
     }
 
     private fun finishRefresh() {

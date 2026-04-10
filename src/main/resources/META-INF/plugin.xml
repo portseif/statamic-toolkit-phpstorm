@@ -222,6 +222,9 @@
         <projectService
             serviceImplementation="com.antlers.support.statamic.StatamicProjectCollections"/>
 
+        <projectService
+            serviceImplementation="com.antlers.support.statamic.StatamicStorageConversionService"/>
+
         <!-- Antlers Language Server -->
         <platform.lsp.serverSupportProvider
             implementation="com.antlers.support.lsp.AntlersLspServerSupportProvider"/>

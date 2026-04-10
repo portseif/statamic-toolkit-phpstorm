@@ -301,7 +301,36 @@ Rules:
 - **Cannot run processes inside ReadAction**: completion handlers run under ReadAction, so process execution (artisan) must happen on a background thread. The service pre-caches results; the completion handler only reads the cached list
 - **PHP discovery**: checks Herd path (`~/Library/Application Support/Herd/bin/php`), Homebrew (`/opt/homebrew/bin/php`), and system PATH
 - **Auto-index**: optional file watcher via `VirtualFileManager.VFS_CHANGES` with 2-second debounce
-- **Storage conversion**: the Data Source settings page has contextual buttons — "Convert to Database" (runs `php please install:eloquent-driver`) when on flat-file, "Export to Flat File" (runs all `php please eloquent:export-*` commands) when on Eloquent. Commands run in a `Task.Backgroundable` with progress bar
+- **Storage conversion**: see the Storage Conversion Service section below
+
+### Storage Conversion Service
+
+`StatamicStorageConversionService` is a project-level service that converts Statamic sites between flat-file and Eloquent (database) storage drivers. It delegates to `StorageConversionEngine` for the actual work.
+
+Architecture:
+
+- **Service layer** (`StatamicStorageConversionService`): thin facade registered as a `projectService` in `plugin.xml`. Caches the current `StorageSnapshot` with a 10-second TTL. Exposes `analyze()`, `convert()`, and `currentStorageOverview()`.
+- **Engine** (`StorageConversionEngine`): stateless worker that handles snapshot capture, analysis, validation, backup, and the multi-phase conversion pipeline. Accepts a `CommandExecutor` interface for testability (the default `IdeCommandExecutor` runs artisan commands via `GeneralCommandLine`/`OSProcessHandler`).
+- **Dialogs** (`StatamicStorageConversionDialogs.kt`): `StorageConversionConfirmationDialog` shows the pre-conversion analysis (resource counts, conflict resolution options, estimated changes) and `StorageConversionProgressDialog` shows live progress during conversion.
+
+Key concepts:
+
+- **`StorageSnapshot`**: captures resource counts and metrics for a given driver at a point in time. Used for before/after comparison and conflict detection.
+- **`StorageConversionAnalysis`**: computed by `engine.analyze()`. Includes the source/target snapshots, conflict detection, supported `StorageConflictResolution` options (MERGE, OVERWRITE, CANCEL), and validation issues.
+- **`StorageConversionRequest`**: bundles the target driver, conflict resolution strategy, and optional `DatabaseConnectionConfig` into a single request object.
+- **Conversion phases**: ANALYZING → VALIDATING → BACKUP → MIGRATING → VERIFYING → COMPLETE. Progress callbacks report phase, step index, total steps, and current command name.
+- **Backup**: flat-file state is backed up by copying `content/` directories; database state uses `php artisan tinker` to export record counts. Backups go to `storage/statamic-toolkit/backups/` with timestamps.
+- **File lock**: `storage/statamic-toolkit/conversion.lock` prevents concurrent conversions via `FileChannel.lock()`.
+- **Logging**: conversion logs are written to `storage/logs/statamic-toolkit-conversion-{timestamp}.log`.
+
+The Data Source settings page triggers conversion through contextual buttons — "Convert to database" when on flat-file (shows a `DatabaseConfigDialog` first for `.env` configuration), "Convert to flat file" when on Eloquent. Both buttons are disabled while a conversion is in progress.
+
+Rules:
+
+- **Do not use `ApplicationManager.getApplication().invokeLater`** from a background thread posting to a modal dialog — it silently drops runnables unless you pass `ModalityState.any()`. Use `SwingUtilities.invokeLater` instead, which has no modality gating.
+- **Do not start execution from the `DialogWrapper` constructor or `init` block.** The modal event loop hasn't started, so UI updates queue up and never dispatch. Use a `windowOpened` listener.
+- Both convert buttons are disabled while commands run (`setConvertButtonsEnabled(false)`) to prevent spawning duplicate threads. They re-enable on completion, cancellation, or error.
+- The `CommandExecutor` interface allows tests to substitute a mock executor without spawning real processes. See `StatamicStorageConversionServiceTest.kt` for examples.
 
 ### Completion Auto-popup
 
@@ -424,6 +453,7 @@ Rules:
 - `AntlersFileViewProvider.supportsIncrementalReparse()` is intentionally `false`. Do not flip it without a reproducible case and validation against mixed Antlers/HTML PSI correctness.
 - **Never run external processes inside a ReadAction.** Completion handlers run under ReadAction; calling `ScriptRunnerUtil.getProcessOutput()` from completion throws `Synchronous execution under ReadAction`. Use a background service (`executeOnPooledThread` or `Task.Backgroundable`) to pre-cache results, and have the completion handler read the cached data.
 - **Post-format processor must use the Antlers PSI tree explicitly.** Call `file.viewProvider.getPsi(AntlersLanguage.INSTANCE)` — the `file` parameter may be the HTML PSI file, causing `file.children` to yield zero `AntlersAntlersTag` nodes.
+- **`invokeLater` and modal dialogs**: `ApplicationManager.getApplication().invokeLater(runnable)` without a `ModalityState` parameter silently refuses to dispatch while a modal dialog is open. If posting UI updates to a modal `DialogWrapper` from a background thread, use `SwingUtilities.invokeLater` instead — it has no modality gating and always dispatches. Alternatively, pass `ModalityState.any()` to the `ApplicationManager` variant.
 - If the IDE freezes again, collect a thread dump or CPU snapshot before making more speculative performance changes.
 
 ## Build Environment
@@ -483,3 +513,5 @@ Every version bump must update all of the following:
 - Tag parameter data: `src/main/kotlin/com/antlers/support/statamic/StatamicTagParameters.kt` (hand-maintained)
 - Scope variable data: `src/main/kotlin/com/antlers/support/statamic/StatamicScopeVariables.kt` (hand-maintained)
 - Block tag registry: `src/main/kotlin/com/antlers/support/AntlersBlockTags.kt`
+- Storage conversion service: `src/main/kotlin/com/antlers/support/statamic/StatamicStorageConversionService.kt`
+- Storage conversion dialogs: `src/main/kotlin/com/antlers/support/settings/StatamicStorageConversionDialogs.kt`
