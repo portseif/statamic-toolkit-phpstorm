@@ -247,6 +247,11 @@ class DataSourceConfigurable : Configurable {
 
     private fun refreshCollections() {
         val project = ProjectManager.getInstance().openProjects.firstOrNull() ?: return
+        val basePath = project.basePath
+        if (basePath != null) {
+            val projectDir = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(basePath)
+            projectDir?.refresh(true, true)
+        }
         StatamicProjectCollections.getInstance(project).refresh()
         statusTimer?.stop()
         statusTimer = Timer(500) { updateStatus() }.apply { start() }
