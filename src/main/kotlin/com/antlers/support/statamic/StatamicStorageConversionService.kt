@@ -960,16 +960,15 @@ internal class StorageConversionEngine(
 
     private fun rewriteDriverConfig(targetDriverValue: String) {
         val php = phpPath ?: throw StorageConversionValidationException("PHP could not be found.")
-        val configPath = basePath.resolve("config/statamic/eloquent-driver.php")
         ensureDriverConfigExists()
         runCommand(
             title = "Updating the driver config",
             args = listOf(
                 php,
-                "-r",
-                oneLine(driverRewriteScript()),
-                configPath.toAbsolutePath().invariantSeparatorsPathString,
-                targetDriverValue,
+                "artisan",
+                "tinker",
+                "--execute",
+                oneLine(driverRewriteScript(targetDriverValue)),
             ),
         )
     }
@@ -1248,20 +1247,10 @@ internal class StorageConversionEngine(
         echo "deleted\t" . §deleted . PHP_EOL;
     """)
 
-    private fun driverRewriteScript(): String = php("""
-        §path = §argv[1];
-        §target = §argv[2];
-        §sections = ['addon_settings','asset_containers','assets','blueprints','collections','collection_trees','entries','fieldsets','forms','form_submissions','global_sets','global_set_variables','navigation_trees','navigations','revisions','sites','taxonomies','terms','tokens'];
-        §config = require §path;
-        foreach (§sections as §section) {
-            §existing = §config[§section] ?? [];
-            if (!is_array(§existing)) {
-                §existing = [];
-            }
-            §existing['driver'] = §target;
-            §config[§section] = §existing;
-        }
-        §content = "<?php\n\nreturn " . var_export(§config, true) . ";\n";
+    private fun driverRewriteScript(targetDriver: String): String = php("""
+        §path = config_path('statamic/eloquent-driver.php');
+        §content = file_get_contents(§path);
+        §content = preg_replace("/'driver'\\s*=>\\s*'[^']+'/", "'driver' => '$targetDriver'", §content);
         file_put_contents(§path, §content);
     """)
 }

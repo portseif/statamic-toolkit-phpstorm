@@ -295,7 +295,9 @@ private class FakeCommandExecutor(
             }
             "Running project migrations" -> success()
             "Updating the driver config" -> {
-                writeDriverConfig(spec.args.last())
+                val script = spec.args.last()
+                val driver = if ("eloquent" in script) "eloquent" else "file"
+                writeDriverConfig(driver)
                 success()
             }
             "Clearing the Statamic stache" -> {
