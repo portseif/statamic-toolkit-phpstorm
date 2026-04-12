@@ -129,7 +129,8 @@ internal class StorageConversionConfirmationDialog(
             isOpaque = false
             viewport.isOpaque = false
             verticalScrollBar.unitIncrement = JBUI.scale(16)
-            preferredSize = Dimension(700, JBUI.scale(520))
+            val baseHeight = if (analysis.warnings.isNotEmpty()) 600 else 520
+            preferredSize = Dimension(700, JBUI.scale(baseHeight))
         }
     }
 }
