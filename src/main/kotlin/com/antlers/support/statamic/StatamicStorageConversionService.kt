@@ -520,17 +520,21 @@ internal class StorageConversionEngine(
         }
 
         val commandAvailability = availablePleaseCommands(request.databaseConfig?.toEnvironment().orEmpty())
-        when (request.target) {
-            StorageConversionTarget.DATABASE -> {
-                if (!commandAvailability.contains("install:eloquent-driver")) {
-                    errors += "The `install:eloquent-driver` command is not available in this project."
+        if (commandAvailability.isNotEmpty()) {
+            when (request.target) {
+                StorageConversionTarget.DATABASE -> {
+                    if (!commandAvailability.contains("install:eloquent-driver")) {
+                        errors += "The `install:eloquent-driver` command is not available in this project."
+                    }
+                }
+                StorageConversionTarget.FLAT_FILE -> {
+                    REQUIRED_EXPORT_COMMANDS
+                        .filterNot(commandAvailability::contains)
+                        .forEach { errors += "The `$it` command is not available in this project." }
                 }
             }
-            StorageConversionTarget.FLAT_FILE -> {
-                REQUIRED_EXPORT_COMMANDS
-                    .filterNot(commandAvailability::contains)
-                    .forEach { errors += "The `$it` command is not available in this project." }
-            }
+        } else {
+            warnings += "Could not list available Statamic commands. Command availability will be checked during conversion."
         }
 
         val mapToColumnsEnabled = basePath.resolve("config/statamic/eloquent-driver.php")
@@ -619,7 +623,7 @@ internal class StorageConversionEngine(
                 envOverrides = envOverrides,
             )
         } catch (t: Throwable) {
-            errors += "Database validation failed while running `php artisan migrate --pretend`: ${t.message.orEmpty().trim()}"
+            warnings += "Could not run `php artisan migrate --pretend`: ${t.message.orEmpty().lineSequence().firstOrNull().orEmpty().trim()}. Migrations will run during conversion."
         }
 
         try {
@@ -638,7 +642,7 @@ internal class StorageConversionEngine(
                 warnings += "The configured database reports less than ${formatStorageSize(MINIMUM_DATABASE_HEADROOM_BYTES)} of remaining capacity."
             }
         } catch (t: Throwable) {
-            errors += "Database connectivity validation failed: ${t.message.orEmpty().trim()}"
+            warnings += "Could not inspect the target database: ${t.message.orEmpty().lineSequence().firstOrNull().orEmpty().trim()}. The database will be set up during conversion."
         }
     }
 
