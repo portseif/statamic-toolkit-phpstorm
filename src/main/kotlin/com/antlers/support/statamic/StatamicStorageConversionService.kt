@@ -259,7 +259,18 @@ internal class StorageConversionEngine(
 
         val source = captureSnapshot(sourceDriver, request.databaseConfig)
         val target = when (request.target) {
-            StorageConversionTarget.DATABASE -> captureDatabaseSnapshot(request.databaseConfig, warnings)
+            StorageConversionTarget.DATABASE -> try {
+                captureDatabaseSnapshot(request.databaseConfig, warnings)
+            } catch (t: Throwable) {
+                logger.info("Database snapshot unavailable (tables may not exist yet): ${t.message}")
+                StorageSnapshot(
+                    driver = StatamicDriver.ELOQUENT,
+                    locationDescription = request.databaseConfig?.locationDescription() ?: "Configured database connection",
+                    sizeBytes = 0,
+                    availableSpaceBytes = null,
+                    metrics = emptyMap(),
+                )
+            }
             StorageConversionTarget.FLAT_FILE -> captureFlatFileSnapshot()
         }
 
