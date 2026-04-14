@@ -290,6 +290,14 @@ After a successful conversion, three things happen:
 
 Post-conversion verification compares source and target snapshots. Mismatches are returned as informational messages, not thrown as exceptions. This prevents partial exports (from non-critical command failures) from triggering a full rollback.
 
+### Validation Resilience
+
+After converting to flat-file, Statamic may fail to boot via `artisan` (e.g. null site in `Cascade` if sites data wasn't exported). The `analyze()` step must handle this gracefully:
+
+- If `availablePleaseCommands()` returns empty, skip command availability checks with a warning instead of blocking.
+- `runMigrationDryRun()` failures are warnings, not errors — the actual `artisan migrate` runs during conversion.
+- `captureDatabaseSnapshot()` failures when inspecting the target return an empty snapshot — the tables get created during conversion via `artisan migrate`.
+
 ### Dialog Rules
 
 - **Do not start execution from a `DialogWrapper` constructor or `init` block.** The modal event loop hasn't started, so UI updates queue up and never dispatch. Use a `windowOpened` listener.

@@ -135,3 +135,21 @@ sourceSets {
         java.srcDirs("src/main/java", "src/main/kotlin", "src/main/gen")
     }
 }
+
+val bumpPatchVersion by tasks.registering {
+    val propsFile = layout.projectDirectory.file("gradle.properties").asFile
+    doLast {
+        val content = propsFile.readText()
+        val match = Regex("""pluginVersion\s*=\s*(\d+)\.(\d+)\.(\d+)""").find(content)
+        if (match != null) {
+            val (major, minor, patch) = match.destructured
+            val nextVersion = "$major.$minor.${patch.toInt() + 1}"
+            propsFile.writeText(content.replace(match.value, "pluginVersion = $nextVersion"))
+            logger.lifecycle("Auto-incremented plugin version to $nextVersion")
+        }
+    }
+}
+
+tasks.named("buildPlugin") {
+    dependsOn(bumpPatchVersion)
+}

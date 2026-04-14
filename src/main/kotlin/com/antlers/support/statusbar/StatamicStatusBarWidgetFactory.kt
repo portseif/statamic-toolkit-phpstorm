@@ -38,6 +38,48 @@ import java.awt.*
 import java.awt.event.MouseEvent
 import javax.swing.*
 
+/**
+ * FlowLayout that wraps to a new line when the container width is exceeded.
+ * Standard FlowLayout reports a single-line preferred size which prevents
+ * wrapping inside a BoxLayout parent.
+ */
+private class WrapLayout : FlowLayout(LEFT, 0, 0) {
+    override fun preferredLayoutSize(target: Container): Dimension = layoutSize(target, true)
+    override fun minimumLayoutSize(target: Container): Dimension =
+        layoutSize(target, false).also { it.width -= hgap + 1 }
+
+    private fun layoutSize(target: Container, preferred: Boolean): Dimension {
+        synchronized(target.treeLock) {
+            val targetWidth = if (target.size.width > 0) target.size.width else Int.MAX_VALUE
+            val insets = target.insets
+            val maxWidth = targetWidth - (insets.left + insets.right + hgap * 2)
+            val dim = Dimension(0, 0)
+            var rowWidth = 0
+            var rowHeight = 0
+            for (i in 0 until target.componentCount) {
+                val m = target.getComponent(i)
+                if (!m.isVisible) continue
+                val d = if (preferred) m.preferredSize else m.minimumSize
+                if (rowWidth + d.width > maxWidth) {
+                    dim.width = maxOf(dim.width, rowWidth)
+                    if (dim.height > 0) dim.height += vgap
+                    dim.height += rowHeight
+                    rowWidth = 0
+                    rowHeight = 0
+                }
+                if (rowWidth != 0) rowWidth += hgap
+                rowWidth += d.width
+                rowHeight = maxOf(rowHeight, d.height)
+            }
+            dim.width = maxOf(dim.width, rowWidth)
+            if (dim.height > 0) dim.height += vgap
+            dim.height += rowHeight + insets.top + insets.bottom + vgap * 2
+            dim.width += insets.left + insets.right + hgap * 2
+            return dim
+        }
+    }
+}
+
 class StatamicStatusBarWidgetFactory : StatusBarWidgetFactory {
     override fun getId(): String = "StatamicIndexingStatus"
     override fun getDisplayName(): String = "Statamic Indexing Status"
@@ -242,23 +284,57 @@ private class StatamicStatusBarWidget(private val project: Project) :
 
             val rowTooltip = group.toolTipText
 
-            val topLine = JPanel(BorderLayout()).apply {
+            val disclosureLabel = JBLabel("+").apply {
+                font = tinyFont
+                foreground = soft
+                border = JBUI.Borders.emptyRight(6)
+            }
+
+            val handlesRow = object : JPanel(WrapLayout()) {
+                override fun getPreferredSize(): Dimension {
+                    val maxWidth = parent?.width?.takeIf { it > 0 } ?: JBUI.scale(360)
+                    val base = super.getPreferredSize()
+                    if (base.width <= maxWidth) return base
+                    // Force a layout at the capped width so WrapLayout reports the wrapped height.
+                    val prev = size
+                    size = Dimension(maxWidth, prev.height)
+                    val wrapped = super.getPreferredSize()
+                    size = prev
+                    return Dimension(maxWidth, wrapped.height)
+                }
+            }.apply {
+                isOpaque = false
+                alignmentX = Component.LEFT_ALIGNMENT
+                isVisible = false
+            }
+
+            val headerPanel = JPanel(BorderLayout()).apply {
                 alignmentX = Component.LEFT_ALIGNMENT
                 isOpaque = false
-                add(createResourceLabel(group, bright, smallFont), BorderLayout.WEST)
+                val leftPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                    isOpaque = false
+                    add(disclosureLabel)
+                    add(createResourceLabel(group, bright, smallFont))
+                }
+                add(leftPanel, BorderLayout.WEST)
                 add(JBLabel(group.items.size.toString()).apply {
                     font = tinyFont
                     foreground = soft
                     toolTipText = rowTooltip
                 }, BorderLayout.EAST)
                 toolTipText = rowTooltip
+                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                addMouseListener(object : java.awt.event.MouseAdapter() {
+                    override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                        handlesRow.isVisible = !handlesRow.isVisible
+                        disclosureLabel.text = if (handlesRow.isVisible) "\u2212" else "+"
+                        row.maximumSize = Dimension(Int.MAX_VALUE, row.preferredSize.height)
+                        SwingUtilities.getWindowAncestor(row)?.pack()
+                    }
+                })
             }
-            row.add(topLine)
+            row.add(headerPanel)
 
-            val handlesRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-                isOpaque = false
-                alignmentX = Component.LEFT_ALIGNMENT
-            }
             group.items.forEachIndexed { i, item ->
                 handlesRow.add(JBLabel(item).apply {
                     font = tinyFont

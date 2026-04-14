@@ -54,10 +54,26 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
         }
         val frames = ArrayDeque<StructureFrame>()
         val edits = mutableListOf<IndentEdit>()
+        var insideInlineBlock = false
 
         for (line in 0 until document.lineCount) {
             val info = standaloneTagsByLine[line] ?: classifyHtmlLine(lineStates[line].trimmed)
             if (info == null) {
+                continue
+            }
+
+            // Skip <script>/<style> block content entirely — the built-in
+            // JS/CSS formatter handles indentation inside those blocks.
+            if (info.kind == ControlTagKind.HTML_OPEN && info.htmlTagName in INLINE_CONTENT_TAGS) {
+                updateFrames(info, frames)
+                insideInlineBlock = true
+                continue
+            }
+            if (insideInlineBlock) {
+                if (info.kind == ControlTagKind.HTML_CLOSE && info.htmlTagName in INLINE_CONTENT_TAGS) {
+                    insideInlineBlock = false
+                    updateFrames(info, frames)
+                }
                 continue
             }
 
@@ -272,7 +288,14 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
         private val htmlOpeningTagPattern = Regex("""<([A-Za-z][\w:-]*)(?:\s+[^<>]*)?>""")
         private val htmlClosingTagPattern = Regex("""</([A-Za-z][\w:-]*)\s*>""")
         private val htmlSelfClosingTagPattern = Regex("""<([A-Za-z][\w:-]*)(?:\s+[^<>]*)?/\s*>""")
-
+        // Multi-line opening tag: starts with <tagName but doesn't close on this line
+        private val htmlMultiLineOpenPattern = Regex("""<([A-Za-z][\w:-]*)(?:\s+.*)?""")
+        private val INLINE_CONTENT_TAGS = setOf("script", "style")
+        // HTML void elements: self-closing by spec, never have a </tag> closer.
+        private val HTML_VOID_ELEMENTS = setOf(
+            "area", "base", "br", "col", "embed", "hr", "img", "input",
+            "link", "meta", "param", "source", "track", "wbr",
+        )
     }
 
     private fun classifyHtmlLine(trimmed: String): StructuralLine? {
@@ -290,7 +313,19 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
         }
 
         htmlOpeningTagPattern.matchEntire(trimmed)?.let { match ->
-            return StructuralLine(ControlTagKind.HTML_OPEN, match.groupValues[1].lowercase())
+            val tagName = match.groupValues[1].lowercase()
+            val kind = if (tagName in HTML_VOID_ELEMENTS) ControlTagKind.HTML_SELF_CLOSING else ControlTagKind.HTML_OPEN
+            return StructuralLine(kind, tagName)
+        }
+
+        // Detect multi-line opening tags: <div\n  id="..."  class="..."\n>
+        // The first line starts with <tagName but the > is on a later line.
+        if (trimmed.startsWith("<") && !trimmed.startsWith("</")) {
+            htmlMultiLineOpenPattern.matchEntire(trimmed)?.let { match ->
+                val tagName = match.groupValues[1].lowercase()
+                val kind = if (tagName in HTML_VOID_ELEMENTS) ControlTagKind.HTML_SELF_CLOSING else ControlTagKind.HTML_OPEN
+                return StructuralLine(kind, tagName)
+            }
         }
 
         return StructuralLine(ControlTagKind.CONTENT_LINE)
