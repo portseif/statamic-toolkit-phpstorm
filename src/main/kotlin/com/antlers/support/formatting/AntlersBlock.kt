@@ -100,7 +100,10 @@ class AntlersBlock(
     }
 
     override fun getChildAttributes(newChildIndex: Int): ChildAttributes {
-        return ChildAttributes(Indent.getNoneIndent(), null)
+        // Delegate to the parent so wrapped HTML/JS/CSS children can inherit
+        // indent context from the underlying language formatter. This enables
+        // proper JS indentation inside <script> tags.
+        return super.getChildAttributes(newChildIndex)
     }
 
     override fun getTemplateTextElementType() = AntlersTokenTypes.TEMPLATE_TEXT

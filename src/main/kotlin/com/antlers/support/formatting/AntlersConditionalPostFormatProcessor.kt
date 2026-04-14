@@ -38,11 +38,6 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
             " ".repeat(indentOptions.INDENT_SIZE.coerceAtLeast(1))
         }
 
-        val standaloneTagsByLine = collectStandaloneTagsByLine(antlersFile, document)
-        if (standaloneTagsByLine.isEmpty()) return
-
-        val startLine = document.getLineNumber(range.startOffset)
-        val endLine = document.getLineNumber(range.endOffset)
         val lineStates = (0 until document.lineCount).map { line ->
             val lineStart = document.getLineStartOffset(line)
             val lineEnd = document.getLineEndOffset(line)
@@ -52,9 +47,20 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
                 trimmed = lineText.trim()
             )
         }
+        val standaloneTagsByLine = collectStandaloneTagsByLine(antlersFile, document)
+        val hasInlineScriptBlocks = lineStates.any { state ->
+            classifyHtmlLine(state.trimmed)?.let { info ->
+                info.kind == ControlTagKind.HTML_OPEN && info.htmlTagName == "script"
+            } == true
+        }
+        if (standaloneTagsByLine.isEmpty() && !hasInlineScriptBlocks) return
+
+        val startLine = document.getLineNumber(range.startOffset)
+        val endLine = document.getLineNumber(range.endOffset)
         val frames = ArrayDeque<StructureFrame>()
         val edits = mutableListOf<IndentEdit>()
-        var insideInlineBlock = false
+        var insideInlineBlock: String? = null
+        var scriptIndentState: ScriptIndentState? = null
 
         for (line in 0 until document.lineCount) {
             val info = standaloneTagsByLine[line] ?: classifyHtmlLine(lineStates[line].trimmed)
@@ -62,17 +68,44 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
                 continue
             }
 
-            // Skip <script>/<style> block content entirely — the built-in
-            // JS/CSS formatter handles indentation inside those blocks.
+            // Let the built-in formatter handle script/style first, then apply
+            // a minimal corrective pass for fragmented <script> content. Mixed
+            // Antlers/JS can split script blocks into multiple formatter
+            // fragments, which sometimes drops leading indentation to column 0.
             if (info.kind == ControlTagKind.HTML_OPEN && info.htmlTagName in INLINE_CONTENT_TAGS) {
                 updateFrames(info, frames)
-                insideInlineBlock = true
+                insideInlineBlock = info.htmlTagName
+                scriptIndentState = if (info.htmlTagName == "script") ScriptIndentState(baseIndentLevel = frames.size) else null
                 continue
             }
-            if (insideInlineBlock) {
-                if (info.kind == ControlTagKind.HTML_CLOSE && info.htmlTagName in INLINE_CONTENT_TAGS) {
-                    insideInlineBlock = false
+            if (insideInlineBlock != null) {
+                if (info.kind == ControlTagKind.HTML_CLOSE && info.htmlTagName == insideInlineBlock) {
+                    insideInlineBlock = null
+                    scriptIndentState = null
                     updateFrames(info, frames)
+                    continue
+                }
+
+                if (insideInlineBlock == "script") {
+                    val scriptState = scriptIndentState ?: ScriptIndentState(baseIndentLevel = frames.size)
+                    val lineStart = document.getLineStartOffset(line)
+                    val lineEnd = document.getLineEndOffset(line)
+                    val lineText = document.charsSequence.subSequence(lineStart, lineEnd).toString()
+                    val currentIndent = lineText.takeWhile { it == ' ' || it == '\t' }
+                    val trimmed = lineText.trim()
+
+                    if (trimmed.isNotEmpty()) {
+                        val desiredDepth = desiredScriptIndentLevel(trimmed, scriptState)
+                        val desiredIndent = indentUnit.repeat(desiredDepth)
+
+                        if (indentWidth(currentIndent, indentOptions.INDENT_SIZE.coerceAtLeast(1)) <
+                            indentWidth(desiredIndent, indentOptions.INDENT_SIZE.coerceAtLeast(1))
+                        ) {
+                            edits.add(IndentEdit(lineStart, lineStart + currentIndent.length, desiredIndent))
+                        }
+                    }
+
+                    updateScriptIndentState(lineText, scriptState)
                 }
                 continue
             }
@@ -235,6 +268,105 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
         return file.viewProvider.baseLanguage == AntlersLanguage.INSTANCE
     }
 
+    private fun desiredScriptIndentLevel(trimmed: String, state: ScriptIndentState): Int {
+        val leadingClosers = trimmed.takeWhile { it == '}' }.length
+        return (state.baseIndentLevel + state.braceDepth - leadingClosers).coerceAtLeast(state.baseIndentLevel)
+    }
+
+    private fun updateScriptIndentState(lineText: String, state: ScriptIndentState) {
+        var index = 0
+
+        while (index < lineText.length) {
+            val ch = lineText[index]
+            val next = lineText.getOrNull(index + 1)
+
+            when {
+                state.inBlockComment -> {
+                    if (ch == '*' && next == '/') {
+                        state.inBlockComment = false
+                        index += 2
+                    } else {
+                        index++
+                    }
+                }
+
+                state.inSingleQuote -> {
+                    if (state.escapeNext) {
+                        state.escapeNext = false
+                    } else if (ch == '\\') {
+                        state.escapeNext = true
+                    } else if (ch == '\'') {
+                        state.inSingleQuote = false
+                    }
+                    index++
+                }
+
+                state.inDoubleQuote -> {
+                    if (state.escapeNext) {
+                        state.escapeNext = false
+                    } else if (ch == '\\') {
+                        state.escapeNext = true
+                    } else if (ch == '"') {
+                        state.inDoubleQuote = false
+                    }
+                    index++
+                }
+
+                state.inTemplateString -> {
+                    if (state.escapeNext) {
+                        state.escapeNext = false
+                    } else if (ch == '\\') {
+                        state.escapeNext = true
+                    } else if (ch == '`') {
+                        state.inTemplateString = false
+                    }
+                    index++
+                }
+
+                ch == '/' && next == '/' -> break
+                ch == '/' && next == '*' -> {
+                    state.inBlockComment = true
+                    index += 2
+                }
+
+                ch == '\'' -> {
+                    state.inSingleQuote = true
+                    index++
+                }
+
+                ch == '"' -> {
+                    state.inDoubleQuote = true
+                    index++
+                }
+
+                ch == '`' -> {
+                    state.inTemplateString = true
+                    index++
+                }
+
+                ch == '{' -> {
+                    state.braceDepth++
+                    index++
+                }
+
+                ch == '}' -> {
+                    state.braceDepth = (state.braceDepth - 1).coerceAtLeast(0)
+                    index++
+                }
+
+                else -> index++
+            }
+        }
+    }
+
+    private fun indentWidth(indent: String, tabWidth: Int): Int {
+        var width = 0
+        for (ch in indent) {
+            width += if (ch == '\t') tabWidth else 1
+        }
+        return width
+    }
+
     private data class IndentEdit(
         val startOffset: Int,
         val endOffset: Int,
@@ -256,6 +388,16 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
     private data class LineState(
         val indent: String,
         val trimmed: String
+    )
+
+    private data class ScriptIndentState(
+        val baseIndentLevel: Int,
+        var braceDepth: Int = 0,
+        var inSingleQuote: Boolean = false,
+        var inDoubleQuote: Boolean = false,
+        var inTemplateString: Boolean = false,
+        var inBlockComment: Boolean = false,
+        var escapeNext: Boolean = false
     )
 
     private enum class StructureKind {
@@ -319,8 +461,10 @@ class AntlersConditionalPostFormatProcessor : PostFormatProcessor {
         }
 
         // Detect multi-line opening tags: <div\n  id="..."  class="..."\n>
-        // The first line starts with <tagName but the > is on a later line.
-        if (trimmed.startsWith("<") && !trimmed.startsWith("</")) {
+        // Only when the tag doesn't close on this line — if the line ends with >
+        // then an earlier matchEntire would have handled it (or the line is mixed
+        // content we shouldn't touch).
+        if (trimmed.startsWith("<") && !trimmed.startsWith("</") && !trimmed.endsWith(">")) {
             htmlMultiLineOpenPattern.matchEntire(trimmed)?.let { match ->
                 val tagName = match.groupValues[1].lowercase()
                 val kind = if (tagName in HTML_VOID_ELEMENTS) ControlTagKind.HTML_SELF_CLOSING else ControlTagKind.HTML_OPEN

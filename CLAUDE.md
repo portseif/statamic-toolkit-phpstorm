@@ -24,6 +24,8 @@ This file provides guidance to Claude Code (`claude.ai/code`) when working in th
 
 Grammar-Kit code generation from `.flex` and `.bnf` files runs automatically before compilation. There is no separate generation step.
 
+### Plugin Dependencies
+
 Runtime plugin dependencies must be declared in both places:
 
 - `build.gradle.kts` via `bundledPlugin()`
@@ -43,6 +45,10 @@ If either side is missing, features can silently fail. Optional dependencies mus
 ### PHP Discovery
 
 The plugin finds PHP at Herd (`~/Library/Application Support/Herd/bin/php`), Homebrew (`/opt/homebrew/bin/php`), or system PATH. Herd paths contain spaces — `GeneralCommandLine` handles quoting automatically.
+
+### Packaging
+
+`./gradlew buildPlugin` produces `build/distributions/statamic-toolkit-x.y.z.zip`. A `bumpPatchVersion` task runs before `buildPlugin` to auto-increment the patch component of `pluginVersion` in `gradle.properties`. Major/minor bumps are still manual.
 
 ## File Conventions
 
@@ -153,18 +159,39 @@ PHP intelligence inside `{{? ?}}` (raw) and `{{$ $}}` (echo) blocks is implement
 
 ### Formatting
 
-Formatting uses `TemplateLanguageFormattingModelBuilder`. `AntlersFormattingModelBuilder` must special-case `OuterLanguageElementType` nodes and delegate them back to `SimpleTemplateLanguageFormattingModelBuilder`.
+Formatting runs in two layers:
+
+1. **`AntlersFormattingModelBuilder` / `AntlersBlock`** — token spacing via `TemplateLanguageFormattingModelBuilder`. `AntlersFormattingModelBuilder` special-cases `OuterLanguageElementType` nodes and delegates them to `SimpleTemplateLanguageFormattingModelBuilder`.
+2. **`AntlersConditionalPostFormatProcessor`** — standalone Antlers control/tag line indentation plus a corrective pass for `<script>` content.
 
 `AntlersBlock` enforces spacing: one space inside `{{ }}`, one space around operators, no space around `=` (parameters), `:` (modifier args), or `/` (paths).
 
-`Reformat Code` uses two layers:
-
-- `AntlersFormattingModelBuilder` / `AntlersBlock` for token spacing
-- `AntlersConditionalPostFormatProcessor` for standalone Antlers control/tag line indentation
-
-The post-format processor uses a structural depth stack over both standalone Antlers and HTML lines. Only real nesting constructs (HTML parents, `if`/`unless`/`switch`/`else`/`elseif`) create indentation. Flat sequences of standalone tags (e.g. consecutive `{{ partial:... }}`) must stay aligned.
-
 **`OP_DIVIDE` spacing:** Use `.around(OP_DIVIDE).none()`. In Antlers, `/` is usually a path separator. `.none()` actively removes spaces; omitting the rule returns `null` and leaves whitespace unchanged.
+
+**`AntlersBlock` indent rules:**
+
+- `getIndent()` returns `NormalIndent` for `TAG_EXPRESSION`/`CLOSING_TAG`, `NoneIndent` otherwise.
+- `getChildAttributes()` must delegate to `super.getChildAttributes(newChildIndex)` — returning a hardcoded `NoneIndent` breaks how `DataLanguageBlockWrapper` children inherit indent context from the underlying HTML/JS/CSS formatter.
+
+**Post-format processor structural indentation:**
+
+Uses a structural depth stack over both standalone Antlers and HTML lines. Only real nesting constructs (HTML parents, `if`/`unless`/`switch`/`else`/`elseif`) create indentation. Flat sequences of standalone tags (e.g. consecutive `{{ partial:... }}`) must stay aligned.
+
+**`<script>` and `<style>` handling:**
+
+The Template Language Framework doesn't propagate indent context from HTML → JS/CSS for template files, so the native formatter leaves top-level JS/CSS statements at column 0 inside `<script>`/`<style>` blocks. `AntlersConditionalPostFormatProcessor` applies a corrective pass that tracks `insideInlineBlock` state and, for `<script>` content:
+
+- Runs `updateScriptIndentState()` per line to maintain a minimal JS state machine tracking brace depth, string state (single/double/template), and comment state (line and block). Braces inside strings/comments don't affect indent.
+- `desiredScriptIndentLevel()` returns `baseIndentLevel + braceDepth - leadingClosers`, where `baseIndentLevel` is the HTML nesting depth of the `<script>` tag and `leadingClosers` handles lines starting with `}`.
+- Only **raises** indent (via `indentWidth` comparison) — never strips existing indentation from the user or the built-in formatter.
+
+For `<style>`, the built-in CSS formatter handles everything; the processor just tracks block boundaries. The brace-counting approach is an intentional tradeoff — full JS/CSS formatter delegation would require reworking the template language block chain.
+
+Rules:
+
+- Do not remove the `hasInlineScriptBlocks` early-out in `processRange()` — without it, files with no Antlers tags (pure HTML + JS) skip the processor entirely and the JS indent fix never runs.
+- `ScriptIndentState` is stateful across lines within a single script block. Always reset it to `null` on `</script>` close.
+- Adding new inline-content tags (e.g. `<template>`) requires updating `INLINE_CONTENT_TAGS` and deciding whether the brace-counting indenter applies.
 
 ### Code Folding
 
@@ -184,15 +211,16 @@ When the user types `{{ /`, `AntlersTypedHandler` scans backward via regex over 
 
 ### Antlers Language Server (LSP)
 
-The plugin integrates the [Stillat Antlers Language Server](https://github.com/Stillat/vscode-antlers-language-server) for formatting and diagnostics. Bundled at `src/main/resources/language-server/antlersls.js`.
+The plugin integrates the [Stillat Antlers Language Server](https://github.com/Stillat/vscode-antlers-language-server) for diagnostics. Bundled at `src/main/resources/language-server/antlersls.js`. `AntlersLspServerSupportProvider` triggers on `.antlers.html`/`.antlers.php` files, and `AntlersLspServerDescriptor` extracts the JS to a temp directory and launches it via `node --stdio`. Requires Node.js (found via Herd, Homebrew, or PATH).
 
-- `AntlersLspServerSupportProvider` triggers on `.antlers.html`/`.antlers.php` files
-- `AntlersLspServerDescriptor` extracts the JS to a temp directory and launches via `node --stdio`
+Native PSI is the source of truth for completion, hover, and go-to-definition. LSP provides diagnostics only.
+
+Rules:
+
 - Registered directly in `plugin.xml` (not via optional dependency). **Do not use `<depends>` with `intellij.platform.lsp`** — it's not a valid plugin ID.
-- Native PSI is the source of truth for completion, hover, go-to-definition. LSP provides formatting and diagnostics only.
 - LSP completion is disabled via `LspCompletionSupport` to avoid duplicating `AntlersCompletionContributor`.
+- **LSP formatting is disabled** (`lspFormattingSupport` returns `null`). The Stillat server flattens indentation inside `<script>` and `<style>` blocks. Do not re-enable without fixing the flattening behavior upstream.
 - The extracted server is patched to remove the VS Code-specific `antlers/projectDetailsAvailable` request.
-- Requires Node.js (found via Herd, Homebrew, or PATH).
 
 To rebuild from upstream:
 ```bash
@@ -276,7 +304,7 @@ Before `eloquent:export-entries`, the engine runs an orphan cleanup via `artisan
 
 ### Driver Config Rewrite
 
-The `eloquent-driver.php` config uses `env()` and `\Statamic\...\Model::class` constants, so it cannot be `require`-ed from bare `php -r`. The rewrite runs via `artisan tinker` with a `preg_replace` on `'driver' => '...'` patterns, preserving the original file structure.
+The `eloquent-driver.php` config uses `env()` and `\Statamic\...\Model::class`, so it cannot be `require`-ed from bare `php -r`. The rewrite runs via `artisan tinker` with a `preg_replace` on `'driver' => '...'` patterns, preserving the original file structure.
 
 ### Post-conversion UI Refresh
 
@@ -345,7 +373,11 @@ Known limitation: tags with `protected static $handle = 'custom_name'` decouple 
 
 ### Status Bar Widget
 
-`StatamicStatusBarWidgetFactory` shows a popup with driver type, indexing status, resource counts, an auto-index checkbox, and a refresh button. Uses `JBPopupFactory.createComponentPopupBuilder()`.
+`StatamicStatusBarWidgetFactory` shows a popup (`JBPopupFactory.createComponentPopupBuilder()`) with driver type, indexing status, resource counts, an auto-index checkbox, and a refresh button.
+
+Resource groups (Collections, Navigations, etc.) are **collapsible** with `+`/`−` disclosure toggles. Clicking a header toggles `handlesRow.isVisible`, swaps the glyph, and calls `SwingUtilities.getWindowAncestor(row)?.pack()` to resize the popup.
+
+The handle list uses a custom `WrapLayout` (defined at the top of the file) that extends `FlowLayout` and overrides `preferredLayoutSize()`/`minimumLayoutSize()` to report wrapped dimensions. Standard `FlowLayout` reports a single-line preferred size inside a `BoxLayout` parent and never wraps. `handlesRow.getPreferredSize()` is also overridden to cap width at `parent?.width ?: JBUI.scale(360)` so the popup doesn't stretch to fit a long single line.
 
 ### Structure View Nesting
 
@@ -372,15 +404,11 @@ Known limitation: tags with `protected static $handle = 'custom_name'` decouple 
 
 ## Release and Maintenance
 
-### Release Notes
-
 Plugin update notes come from `CHANGELOG.md`, not `<change-notes>` in `plugin.xml`. `build.gradle.kts` extracts version sections and feeds them into `pluginConfiguration.changeNotes`. Verify the generated block in `build/tmp/patchPluginXml/plugin.xml`.
-
-### Release Process
 
 Every version bump must update:
 
-1. `pluginVersion` in `gradle.properties`
+1. `pluginVersion` in `gradle.properties` (patch is auto-bumped by `buildPlugin`; set manually for major/minor)
 2. A new `## [x.y.z]` section at the top of `CHANGELOG.md`
 3. `README.md` features list and roadmap if the release adds visible features
 4. `CLAUDE.md` if the release adds new subsystems or patterns

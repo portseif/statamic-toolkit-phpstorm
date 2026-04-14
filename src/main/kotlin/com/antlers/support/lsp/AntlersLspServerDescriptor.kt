@@ -94,8 +94,11 @@ class AntlersLspServerDescriptor(project: Project) :
     override val lspCompletionSupport: LspCompletionSupport
         get() = DISABLED_COMPLETION_SUPPORT
 
-    override val lspFormattingSupport: LspFormattingSupport
-        get() = NATIVE_FORMATTING_SUPPORT
+    // Disable LSP formatting entirely — it flattens indentation inside
+    // <script> and <style> blocks. The native IntelliJ formatter (plus our
+    // AntlersConditionalPostFormatProcessor) handles Antlers files correctly.
+    override val lspFormattingSupport: LspFormattingSupport?
+        get() = null
 
     // Disable LSP features that our native PSI already handles well
     override val lspHoverSupport: Boolean get() = false
