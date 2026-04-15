@@ -26,8 +26,11 @@ object StatamicScopeVariables {
         ScopeVariable("no_results", "True when loop has no items", "boolean"),
     )
 
-    /** Common entry fields available inside collection loops. */
-    private val ENTRY_FIELDS: List<ScopeVariable> = listOf(
+    /**
+     * Common entry fields. Available inside collection loops AND at the top level of any
+     * Antlers template (templates are rendered in an entry context, so these are always valid).
+     */
+    internal val ENTRY_FIELDS: List<ScopeVariable> = listOf(
         ScopeVariable("title", "Entry title", "string"),
         ScopeVariable("slug", "Entry URL slug", "string"),
         ScopeVariable("url", "Entry URL path", "string"),

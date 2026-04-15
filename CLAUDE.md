@@ -126,7 +126,12 @@ The parser and lexer must share the same `IElementType` instances. `AntlersToken
 
 `AntlersHighlightingAnnotator` colors all identifier parts within `AntlersTagName` nodes. It uses `isTagLike()` to distinguish real tags (namespaced, parameterized, closing, or known block tags) from simple variables like `{{ title }}`.
 
-Partial paths (`partial:components/hero`) get the `TAG_PATH` text attribute with underline, signaling they are navigable. Both Darcula and Default color schemes define `ANTLERS_TAG_PATH` with `EFFECT_TYPE=1` (underline).
+Tag-name separators use distinct text attributes:
+
+- `:` in tag names (`collection:count`, `form:create`, `partial:hero`) → `DELIMITER` attribute (same as `{{` / `}}`), to visually separate the namespace halves
+- `/` in partial paths (`partial:components/hero`) → `TAG_PATH` attribute with underline, to signal the path is navigable
+
+Both Darcula and Default color schemes define `ANTLERS_TAG_PATH` with `EFFECT_TYPE=1` (underline). When editing separator coloring, update `AntlersEditorHighlighterTest.testSemanticHighlightingUnderlinesOnlyPartialPathPortion` which asserts which tokens land in each attribute bucket.
 
 ### Alpine.js Integration
 
@@ -240,6 +245,14 @@ Official Statamic tags, modifiers, and variables are generated (not hand-maintai
 - Runtime lookup: `StatamicCatalog`
 
 Powers completion (`StatamicData`, `AntlersCompletionContributor`), hover docs (`AntlersDocumentationProvider`), and official descriptions/examples/URLs.
+
+Statamic's public docs don't enumerate per-entry fields like `content`, `title`, `id`, `slug`, `permalink`, etc., so the scraper can't pick them up. These are always valid at a template's top level (Antlers templates render in an entry context), so they're surfaced via a second source:
+
+- `StatamicScopeVariables.ENTRY_FIELDS` — the canonical list (`internal val`, used by both scope-aware and top-level lookups)
+- `StatamicCatalog.findVariable(name)` — falls back to an entry-fields map built from `ENTRY_FIELDS` when no generated variable matches. Powers hover docs.
+- `StatamicData.VARIABLES` — merges `GENERATED_VARIABLES` with `ENTRY_FIELDS` via `distinctBy { it.name }` (generated wins on collision). Powers top-level completion via `VARIABLE_ELEMENTS`.
+
+To add a new always-available entry field, append to `ENTRY_FIELDS` — the catalog, completion list, and scope-aware completion all pick it up automatically.
 
 ### Completion Pre-building
 

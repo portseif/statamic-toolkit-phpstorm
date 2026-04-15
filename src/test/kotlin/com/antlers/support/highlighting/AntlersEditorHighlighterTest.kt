@@ -83,11 +83,16 @@ class AntlersEditorHighlighterTest : BasePlatformTestCase() {
         val tagHighlights = infos
             .filter { it.forcedTextAttributesKey == AntlersHighlighterColors.TAG_NAME }
             .map { text.substring(it.startOffset, it.endOffset) }
+        val delimiterHighlights = infos
+            .filter { it.forcedTextAttributesKey == AntlersHighlighterColors.DELIMITER }
+            .map { text.substring(it.startOffset, it.endOffset) }
 
         assertContainsElements(pathHighlights, "partials", "sections", "footer", "/")
         assertDoesntContain(pathHighlights, "partial")
         assertDoesntContain(pathHighlights, ":")
-        assertContainsElements(tagHighlights, "partial", ":")
+        assertContainsElements(tagHighlights, "partial")
+        assertDoesntContain(tagHighlights, ":")
+        assertContainsElements(delimiterHighlights, ":")
     }
 
     fun testSemanticHighlightingOnlyColorsTagHeadForNamespacedTag() {

@@ -16,6 +16,16 @@ object StatamicCatalog {
     private val tagsByName = tags.associateBy { it.name }
     private val modifiersByName = modifiers.associateBy { it.name }
     private val variablesByName = variables.associateBy { it.name }
+    private val entryFieldsByName: Map<String, StatamicDocItem> =
+        StatamicScopeVariables.ENTRY_FIELDS.associate { field ->
+            field.name to StatamicDocItem(
+                name = field.name,
+                displayName = field.name,
+                description = field.description,
+                example = null,
+                url = "https://statamic.dev/variables",
+            )
+        }
     private val subTagsByRoot = tags
         .filter { ':' in it.name }
         .groupBy(
@@ -33,7 +43,13 @@ object StatamicCatalog {
 
     fun findModifier(name: String): StatamicDocItem? = modifiersByName[name]
 
-    fun findVariable(name: String): StatamicDocItem? = variablesByName[name]
+    /**
+     * Look up a variable by name. Falls back to common entry fields (title, content, id, etc.)
+     * if no generated variable matches, since Statamic templates are rendered in an entry
+     * context where these fields are always available at the top level.
+     */
+    fun findVariable(name: String): StatamicDocItem? =
+        variablesByName[name] ?: entryFieldsByName[name]
 
     fun subTags(rootName: String): List<StatamicDocItem> = subTagsByRoot[rootName].orEmpty()
 }

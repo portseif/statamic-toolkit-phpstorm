@@ -38,20 +38,20 @@ class AntlersHighlightingAnnotator : Annotator {
         }
 
         // Highlight separators inside tag names.
+        // The `/` in partial paths (e.g. partial:components/hero) keeps the TAG_PATH
+        // attribute so it stays navigable/underlined. The `:` delimiter in tag names
+        // (e.g. collection:count, form:create) uses the generic DELIMITER attribute
+        // to visually distinguish it from the identifier parts on either side.
         if (elementType == AntlersTokenTypes.COLON || elementType == AntlersTokenTypes.OP_DIVIDE) {
             val parent = element.parent
             if (parent is AntlersTagName && isTagLike(parent)) {
                 val fullText = parent.text ?: return
-                if (isPartialPath(fullText)) {
-                    val attributes = if (elementType == AntlersTokenTypes.OP_DIVIDE) {
-                        AntlersHighlighterColors.TAG_PATH
-                    } else {
-                        AntlersHighlighterColors.TAG_NAME
-                    }
-                    applyHighlight(holder, element, attributes)
+                val attributes = if (elementType == AntlersTokenTypes.OP_DIVIDE && isPartialPath(fullText)) {
+                    AntlersHighlighterColors.TAG_PATH
                 } else {
-                    applyHighlight(holder, element, AntlersHighlighterColors.TAG_NAME)
+                    AntlersHighlighterColors.DELIMITER
                 }
+                applyHighlight(holder, element, attributes)
             }
         }
     }

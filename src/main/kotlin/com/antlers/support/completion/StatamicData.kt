@@ -2,6 +2,7 @@ package com.antlers.support.completion
 
 import com.antlers.support.AntlersIcons
 import com.antlers.support.statamic.StatamicCatalog
+import com.antlers.support.statamic.StatamicScopeVariables
 import com.antlers.support.statamic.StatamicTagParameters
 import com.intellij.codeInsight.completion.InsertionContext
 import com.intellij.codeInsight.lookup.LookupElement
@@ -33,7 +34,13 @@ object StatamicData {
     }
 
     val VARIABLES: List<CompletionItem> by lazy {
-        StatamicCatalog.variables.map { CompletionItem(it.name, it.description) }
+        val generated = StatamicCatalog.variables.map { CompletionItem(it.name, it.description) }
+        val entryFields = StatamicScopeVariables.ENTRY_FIELDS.map {
+            CompletionItem(it.name, it.description)
+        }
+        // Generated variables win on name collisions (e.g. "collection" is both an entry
+        // field and a built-in variable — prefer the built-in doc).
+        (generated + entryFields).distinctBy { it.name }
     }
 
     // -------------------------------------------------------------------------
