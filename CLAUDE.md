@@ -129,9 +129,9 @@ The parser and lexer must share the same `IElementType` instances. `AntlersToken
 Tag-name separators use distinct text attributes:
 
 - `:` in tag names (`collection:count`, `form:create`, `partial:hero`) → `DELIMITER` attribute (same as `{{` / `}}`), to visually separate the namespace halves
-- `/` in partial paths (`partial:components/hero`) → `TAG_PATH` attribute with underline, to signal the path is navigable
+- `/` in partial paths (`partial:components/hero`) → `TAG_PATH` attribute, a separate color key from the tag head so users can style path segments distinctly if desired
 
-Both Darcula and Default color schemes define `ANTLERS_TAG_PATH` with `EFFECT_TYPE=1` (underline). When editing separator coloring, update `AntlersEditorHighlighterTest.testSemanticHighlightingUnderlinesOnlyPartialPathPortion` which asserts which tokens land in each attribute bucket.
+The bundled `ANTLERS_PARTIAL_PATH` and `ANTLERS_TAG_HEAD` keys (in both Darcula and Default schemes) default to the same color with no underline or other effect. When editing separator coloring, update `AntlersEditorHighlighterTest` assertions that validate which tokens land in each attribute bucket. Partial navigation is provided by `AntlersGotoDeclarationHandler` (not a `PsiReference`), so there is no hover-underline on partial paths.
 
 ### Alpine.js Integration
 

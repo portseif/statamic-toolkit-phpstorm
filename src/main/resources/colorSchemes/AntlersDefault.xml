@@ -11,16 +11,14 @@
         </value>
     </option>
     <option name="ANTLERS_IDENTIFIER" baseAttributes="DEFAULT_IDENTIFIER"/>
-    <option name="ANTLERS_TAG_NAME">
+    <option name="ANTLERS_TAG_HEAD">
         <value>
             <option name="FOREGROUND" value="7a7a43"/>
         </value>
     </option>
-    <option name="ANTLERS_TAG_PATH">
+    <option name="ANTLERS_PARTIAL_PATH">
         <value>
             <option name="FOREGROUND" value="7a7a43"/>
-            <option name="EFFECT_COLOR" value="7a7a43"/>
-            <option name="EFFECT_TYPE" value="1"/>
         </value>
     </option>
     <option name="ANTLERS_OPERATOR" baseAttributes="DEFAULT_OPERATION_SIGN"/>

@@ -15,16 +15,14 @@
             <option name="FOREGROUND" value="A9B7C6"/>
         </value>
     </option>
-    <option name="ANTLERS_TAG_NAME">
+    <option name="ANTLERS_TAG_HEAD">
         <value>
             <option name="FOREGROUND" value="FFC66D"/>
         </value>
     </option>
-    <option name="ANTLERS_TAG_PATH">
+    <option name="ANTLERS_PARTIAL_PATH">
         <value>
             <option name="FOREGROUND" value="FFC66D"/>
-            <option name="EFFECT_COLOR" value="FFC66D"/>
-            <option name="EFFECT_TYPE" value="1"/>
         </value>
     </option>
     <option name="ANTLERS_OPERATOR" baseAttributes="DEFAULT_OPERATION_SIGN"/>
