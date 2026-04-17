@@ -119,7 +119,12 @@ class DataSourceConfigurable : Configurable {
     private var panel: JPanel? = null
     private var driverValue: JBLabel? = null
     private var statusValue: JBLabel? = null
-    private var locationValue: JBLabel? = null
+    private var locationsWrapper: JPanel? = null
+    private var locationsHeaderRow: JPanel? = null
+    private var locationsToggle: JBLabel? = null
+    private var locationsSummary: JBLabel? = null
+    private var locationsList: JPanel? = null
+    private var locationsExpanded = false
     private var sizeValue: JBLabel? = null
     private var recordsValue: JBLabel? = null
     private var resourcesPanel: JPanel? = null
@@ -146,10 +151,37 @@ class DataSourceConfigurable : Configurable {
             font = detailFont
             foreground = dim
         }
-        locationValue = JBLabel("—").apply {
+        locationsSummary = JBLabel("—").apply {
             font = detailFont
             foreground = dim
         }
+        locationsToggle = JBLabel(COLLAPSED_GLYPH).apply {
+            font = detailFont
+            foreground = dim
+            isVisible = false
+            border = JBUI.Borders.emptyRight(4)
+        }
+        locationsHeaderRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(locationsToggle)
+            add(locationsSummary)
+        }
+        locationsList = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            alignmentX = Component.LEFT_ALIGNMENT
+            isOpaque = false
+            isVisible = false
+            border = JBUI.Borders.empty(4, 14, 0, 0)
+        }
+        locationsWrapper = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(locationsHeaderRow)
+            add(locationsList)
+        }
+        installHeaderToggleBehavior()
         sizeValue = JBLabel("—").apply {
             font = detailFont
             foreground = dim
@@ -264,9 +296,111 @@ class DataSourceConfigurable : Configurable {
 
     private fun updateStorageOverview(conversionService: StatamicStorageConversionService) {
         val snapshot = conversionService.currentStorageOverview()
-        locationValue?.text = snapshot?.locationDescription ?: "—"
+        updateLocationsDisplay(snapshot?.locationDescription)
         sizeValue?.text = snapshot?.sizeBytes?.let(::formatStorageSize) ?: "—"
         recordsValue?.text = snapshot?.totalRecords?.toString() ?: "—"
+    }
+
+    private fun updateLocationsDisplay(raw: String?) {
+        val summary = locationsSummary ?: return
+        val toggle = locationsToggle ?: return
+        val list = locationsList ?: return
+        val header = locationsHeaderRow ?: return
+
+        val entries = raw
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
+
+        list.removeAll()
+
+        val dim = JBUI.CurrentTheme.Label.disabledForeground()
+        val bright = JBUI.CurrentTheme.Label.foreground()
+
+        when {
+            entries.isEmpty() -> {
+                summary.text = "—"
+                summary.foreground = dim
+                toggle.isVisible = false
+                list.isVisible = false
+                header.cursor = java.awt.Cursor.getDefaultCursor()
+            }
+            entries.size == 1 -> {
+                summary.text = entries[0]
+                summary.foreground = dim
+                toggle.isVisible = false
+                list.isVisible = false
+                header.cursor = java.awt.Cursor.getDefaultCursor()
+            }
+            else -> {
+                summary.text = "${entries.size} paths"
+                summary.foreground = bright
+                toggle.isVisible = true
+                toggle.text = if (locationsExpanded) EXPANDED_GLYPH else COLLAPSED_GLYPH
+                toggle.foreground = bright
+                header.cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                entries.forEach { entry ->
+                    list.add(createPathLabel(entry))
+                }
+                list.isVisible = locationsExpanded
+            }
+        }
+
+        locationsWrapper?.revalidate()
+        locationsWrapper?.repaint()
+    }
+
+    private fun createPathLabel(path: String): JComponent {
+        val baseFont = UIManager.getFont("Label.font")
+        val detailFont = baseFont.deriveFont(baseFont.size2D - 1f)
+        val dim = JBUI.CurrentTheme.Label.disabledForeground()
+        val link = JBUI.CurrentTheme.Link.Foreground.ENABLED
+
+        return JBLabel(path).apply {
+            font = detailFont
+            foreground = dim
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = JBUI.Borders.emptyTop(2)
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            toolTipText = "Click to copy '$path'"
+            addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseEntered(e: java.awt.event.MouseEvent) {
+                    foreground = link
+                }
+                override fun mouseExited(e: java.awt.event.MouseEvent) {
+                    foreground = dim
+                }
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                    clipboard.setContents(java.awt.datatransfer.StringSelection(path), null)
+                    foreground = link
+                    javax.swing.Timer(600) { foreground = dim }.apply { isRepeats = false; start() }
+                }
+            })
+        }
+    }
+
+    private fun installHeaderToggleBehavior() {
+        val header = locationsHeaderRow ?: return
+        val listener = object : java.awt.event.MouseAdapter() {
+            override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                if (locationsToggle?.isVisible == true) {
+                    toggleLocationsExpanded()
+                }
+            }
+        }
+        header.addMouseListener(listener)
+        locationsToggle?.addMouseListener(listener)
+        locationsSummary?.addMouseListener(listener)
+    }
+
+    private fun toggleLocationsExpanded() {
+        locationsExpanded = !locationsExpanded
+        locationsToggle?.text = if (locationsExpanded) EXPANDED_GLYPH else COLLAPSED_GLYPH
+        locationsList?.isVisible = locationsExpanded
+        locationsWrapper?.revalidate()
+        locationsWrapper?.repaint()
     }
 
     private fun runExportToFlatFile() {
@@ -494,11 +628,19 @@ class DataSourceConfigurable : Configurable {
     }
 
     private fun createStorageDetailsPanel(indent: javax.swing.border.Border): JComponent {
+        val locationsLabel = JBLabel("Locations:").apply {
+            verticalAlignment = javax.swing.SwingConstants.TOP
+        }
         return FormBuilder.createFormBuilder()
-            .addLabeledComponent(JBLabel("Location:"), locationValue!!.apply { border = indent })
+            .addLabeledComponent(locationsLabel, locationsWrapper!!.apply { border = indent })
             .addLabeledComponent(JBLabel("Size:"), sizeValue!!.apply { border = indent })
             .addLabeledComponent(JBLabel("Tracked records:"), recordsValue!!.apply { border = indent })
             .panel
+    }
+
+    private companion object {
+        private const val COLLAPSED_GLYPH = "▸"
+        private const val EXPANDED_GLYPH = "▾"
     }
 }
 
