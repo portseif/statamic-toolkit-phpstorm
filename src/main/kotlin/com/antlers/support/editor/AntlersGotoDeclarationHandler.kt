@@ -14,6 +14,7 @@ import com.intellij.psi.search.GlobalSearchScopesCore
 import com.intellij.psi.util.PsiTreeUtil
 import com.antlers.support.AntlersLanguage
 import com.antlers.support.actions.StatamicSnippetTemplates
+import com.antlers.support.partials.AntlersPartialPaths
 import com.antlers.support.psi.AntlersModifier
 import com.antlers.support.psi.AntlersTagExpression
 import com.antlers.support.psi.AntlersTagName
@@ -42,6 +43,9 @@ class AntlersGotoDeclarationHandler : GotoDeclarationHandler {
         val antlersFile = viewProvider.getPsi(AntlersLanguage.INSTANCE) ?: return null
         val antlersElement = antlersFile.findElementAt(offset) ?: return null
 
+        val partialTargets = resolvePartial(antlersElement, offset, project)
+        if (partialTargets != null) return partialTargets.toTypedArray()
+
         // 1. Custom tag navigation — Cmd-click tag name → app/Tags/ClassName.php
         if (settings.enableCustomTagNavigation) {
             val tagTargets = resolveCustomTag(antlersElement, project)
@@ -59,6 +63,35 @@ class AntlersGotoDeclarationHandler : GotoDeclarationHandler {
         val injectedLanguageManager = InjectedLanguageManager.getInstance(sourceElement.project)
         return injectedLanguageManager.getTopLevelFile(sourceElement).virtualFile
             ?: sourceElement.containingFile?.virtualFile
+    }
+
+    // -------------------------------------------------------------------------
+    // Partial resolution
+    // -------------------------------------------------------------------------
+
+    private fun resolvePartial(element: PsiElement, offset: Int, project: Project): List<PsiElement>? {
+        val tagName = PsiTreeUtil.getParentOfType(element, AntlersTagName::class.java)
+            ?: if (element.parent is AntlersTagName) element.parent as AntlersTagName else null
+            ?: return null
+
+        val fullName = tagName.text
+        val prefix = partialPrefix(fullName) ?: return null
+        val pathStart = tagName.textRange.startOffset + prefix.length
+        if (offset < pathStart) return null
+
+        val partialPath = fullName.removePrefix(prefix)
+        if (partialPath.isBlank()) return null
+
+        val matches = AntlersPartialPaths.matchingPsiFiles(project, partialPath)
+        return if (matches.isNotEmpty()) matches else null
+    }
+
+    private fun partialPrefix(text: String): String? {
+        return when {
+            text.startsWith("partial:") -> "partial:"
+            text.startsWith("partial/") -> "partial/"
+            else -> null
+        }
     }
 
     // -------------------------------------------------------------------------

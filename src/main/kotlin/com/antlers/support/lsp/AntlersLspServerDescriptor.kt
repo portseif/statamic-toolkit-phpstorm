@@ -6,6 +6,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.lsp.api.ProjectWideLspServerDescriptor
 import com.intellij.platform.lsp.api.customization.LspCompletionSupport
+import com.intellij.platform.lsp.api.customization.LspDocumentLinkSupport
 import com.intellij.platform.lsp.api.customization.LspFormattingSupport
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -103,6 +104,14 @@ class AntlersLspServerDescriptor(project: Project) :
     // Disable LSP features that our native PSI already handles well
     override val lspHoverSupport: Boolean get() = false
     override val lspGoToDefinitionSupport: Boolean get() = false
+
+    // The Stillat server publishes textDocument/documentLink responses for
+    // `partial:` tag names, which IntelliJ renders as static underlined
+    // hyperlinks. Partial navigation is handled natively by
+    // AntlersGotoDeclarationHandler, so the LSP document-link channel is
+    // redundant — disabling it removes the underline.
+    override val lspDocumentLinkSupport: LspDocumentLinkSupport?
+        get() = null
 
     internal companion object {
         internal val DISABLED_COMPLETION_SUPPORT: LspCompletionSupport = object : LspCompletionSupport() {

@@ -30,7 +30,8 @@ A PhpStorm plugin providing rich editor support for the [Antlers](https://statam
 - **Typing Aids** -- auto-closing braces, smart quotes, and smart enter handling
 - **Status Bar Widget** -- shows Statamic indexing status, driver detection, resource counts, Antlers LSP connection state, quick links, refresh, and auto-index toggle
 - **Statamic Menu** -- top-level menu with content query snippets plus controller, tag, and modifier generators
-- **Customizable Colors** -- Settings > Editor > Color Scheme > Antlers, including underlined partial paths
+- **Storage Driver Conversion** -- switch between flat-file and Eloquent storage from the Data Source settings page with preflight validation, progress reporting, backups, verification, and rollback
+- **Customizable Colors** -- Settings > Editor > Color Scheme > Antlers, with separate keys for tag heads, partial paths, delimiters, modifiers, and parameters
 
 ## Supported Syntax
 
@@ -76,6 +77,23 @@ This launches a sandboxed IDE instance with the plugin installed.
 ./gradlew runIde         # Launch sandbox IDE
 ./gradlew buildPlugin    # Package as .zip for distribution
 ```
+
+## Storage Driver Conversion
+
+The `Settings > Languages & Frameworks > Statamic > Data Source` page can switch a project between flat-file and Eloquent storage.
+
+- The page detects the active driver, storage location, storage size, and tracked record count before conversion.
+- Every conversion runs a preflight pass that checks PHP/artisan/please availability, writable project files, disk headroom, database connectivity, migration readiness, and target-side conflicts.
+- The conversion workflow creates backups before changing state, shows phase-based progress, verifies the migrated data, rewrites the active driver only after verification, and rolls back automatically if a step fails.
+- Detailed logs are written to `storage/logs/statamic-storage-conversion-*.log`, and recovery backups are stored under `storage/statamic-toolkit/backups/`.
+
+Known limitations:
+
+- The project still needs working `php`, `artisan`, and `please` commands in the local environment.
+- Database backup and rollback use a JSON snapshot of Statamic tables rather than engine-specific dump tools.
+- Projects using `map_data_to_columns=true` may need a manual review of custom entry models after conversion.
+
+See [STORAGE_DRIVER_CONVERSION.md](STORAGE_DRIVER_CONVERSION.md) for the full conversion sequence, conflict handling behavior, and rollback details.
 
 ## Roadmap
 

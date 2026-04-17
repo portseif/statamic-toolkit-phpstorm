@@ -57,10 +57,20 @@ class AntlersGotoDeclarationHandlerTest : BasePlatformTestCase() {
         assertNull("Expected no top-level reference on opening braces", myFixture.file.viewProvider.findReferenceAt(braceOffset))
         assertNull("Expected no top-level reference on tag head", myFixture.file.viewProvider.findReferenceAt(tagOffset))
 
-        val reference = myFixture.file.viewProvider.findReferenceAt(pathOffset)
-        assertNotNull("Expected partial path PSI reference", reference)
-        assertEquals("components/hero", reference!!.canonicalText)
-        assertEquals(partialFile.virtualFile.path, reference.resolve()!!.containingFile.virtualFile.path)
+        val antlersFile = myFixture.file.viewProvider.getPsi(AntlersLanguage.INSTANCE)
+            ?: error("Expected Antlers PSI file for ${myFixture.file.name}")
+        val pathElement = antlersFile.findElementAt(pathOffset)
+            ?: error("Expected Antlers PSI element for partial path")
+        assertTrue("Expected partial path leaf to have no registered PSI references", pathElement.references.isEmpty())
+
+        val sourceElement = antlersFile.findElementAt(pathOffset)
+            ?: error("Expected source element for goto declaration")
+        val targets = AntlersGotoDeclarationHandler()
+            .getGotoDeclarationTargets(sourceElement, pathOffset, myFixture.editor)
+            ?: error("Expected goto declaration targets for partial path")
+
+        assertEquals(1, targets.size)
+        assertEquals(partialFile.virtualFile.path, targets.single().containingFile.virtualFile.path)
     }
 
     fun testAlpineXForLoopVariablesResolveThroughPsiReference() {
