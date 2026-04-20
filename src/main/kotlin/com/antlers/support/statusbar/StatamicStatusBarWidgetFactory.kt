@@ -11,6 +11,7 @@ import com.antlers.support.statamic.StatamicProjectCollections
 import com.antlers.support.statamic.displayName
 import com.antlers.support.statamic.entryFields
 import com.antlers.support.statamic.totalResources
+import com.antlers.support.ui.WrapLayout
 import com.intellij.ide.projectView.ProjectView
 import com.intellij.ide.projectView.impl.ProjectViewPane
 import com.intellij.openapi.actionSystem.ActionManager
@@ -37,48 +38,6 @@ import com.intellij.util.ui.JBUI
 import java.awt.*
 import java.awt.event.MouseEvent
 import javax.swing.*
-
-/**
- * FlowLayout that wraps to a new line when the container width is exceeded.
- * Standard FlowLayout reports a single-line preferred size which prevents
- * wrapping inside a BoxLayout parent.
- */
-private class WrapLayout : FlowLayout(LEFT, 0, 0) {
-    override fun preferredLayoutSize(target: Container): Dimension = layoutSize(target, true)
-    override fun minimumLayoutSize(target: Container): Dimension =
-        layoutSize(target, false).also { it.width -= hgap + 1 }
-
-    private fun layoutSize(target: Container, preferred: Boolean): Dimension {
-        synchronized(target.treeLock) {
-            val targetWidth = if (target.size.width > 0) target.size.width else Int.MAX_VALUE
-            val insets = target.insets
-            val maxWidth = targetWidth - (insets.left + insets.right + hgap * 2)
-            val dim = Dimension(0, 0)
-            var rowWidth = 0
-            var rowHeight = 0
-            for (i in 0 until target.componentCount) {
-                val m = target.getComponent(i)
-                if (!m.isVisible) continue
-                val d = if (preferred) m.preferredSize else m.minimumSize
-                if (rowWidth + d.width > maxWidth) {
-                    dim.width = maxOf(dim.width, rowWidth)
-                    if (dim.height > 0) dim.height += vgap
-                    dim.height += rowHeight
-                    rowWidth = 0
-                    rowHeight = 0
-                }
-                if (rowWidth != 0) rowWidth += hgap
-                rowWidth += d.width
-                rowHeight = maxOf(rowHeight, d.height)
-            }
-            dim.width = maxOf(dim.width, rowWidth)
-            if (dim.height > 0) dim.height += vgap
-            dim.height += rowHeight + insets.top + insets.bottom + vgap * 2
-            dim.width += insets.left + insets.right + hgap * 2
-            return dim
-        }
-    }
-}
 
 class StatamicStatusBarWidgetFactory : StatusBarWidgetFactory {
     override fun getId(): String = "StatamicIndexingStatus"

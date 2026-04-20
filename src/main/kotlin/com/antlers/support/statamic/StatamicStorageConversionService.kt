@@ -397,6 +397,7 @@ internal class StorageConversionEngine(
                     }
                     StorageConversionTarget.FLAT_FILE -> rewriteDriverConfig("file")
                 }
+                rewriteGitIgnore(request.target, audit)
                 clearStache(request.databaseConfig?.toEnvironment().orEmpty(), audit)
 
                 progress(StorageConversionPhase.COMPLETED, 100, "Conversion complete")
@@ -494,6 +495,15 @@ internal class StorageConversionEngine(
         val envFile = basePath.resolve(".env")
         if (request.target == StorageConversionTarget.DATABASE && !Files.isWritable(envFile)) {
             errors += "The .env file is not writable, so the plugin cannot persist the database connection."
+        }
+
+        val gitIgnoreFile = basePath.resolve(".gitignore")
+        if (gitIgnoreFile.exists()) {
+            if (!Files.isWritable(gitIgnoreFile)) {
+                errors += "The .gitignore file is not writable, so the plugin cannot update storage ignore rules."
+            }
+        } else if (!Files.isWritable(basePath)) {
+            errors += "The project root must be writable so the plugin can create a .gitignore file for storage ignore rules."
         }
 
         val configDir = basePath.resolve("config/statamic")
@@ -859,12 +869,10 @@ internal class StorageConversionEngine(
     ) {
         val php = phpPath ?: throw StorageConversionValidationException("PHP could not be found.")
         progress(StorageConversionPhase.MIGRATING, 38, "Installing the Eloquent driver", "")
-        runCommand(
-            title = "Installing the Eloquent driver",
-            args = listOf(php, "please", "install:eloquent-driver", "--no-interaction"),
-            envOverrides = envOverrides,
-        )
-        audit.info("Ran install:eloquent-driver")
+        bootstrapEloquentDriver(envOverrides, audit)
+
+        progress(StorageConversionPhase.MIGRATING, 44, "Publishing Eloquent driver migrations", "")
+        publishEloquentDriverMigrations(php, envOverrides, audit)
 
         progress(StorageConversionPhase.MIGRATING, 48, "Running migrations", "")
         runCommand(
@@ -913,6 +921,63 @@ internal class StorageConversionEngine(
         }
     }
 
+    private fun bootstrapEloquentDriver(
+        envOverrides: Map<String, String>,
+        audit: ConversionAudit,
+    ) {
+        val php = phpPath ?: throw StorageConversionValidationException("PHP could not be found.")
+        // `install:eloquent-driver` now prompts for repositories and import confirmation.
+        // Bootstrapping through `tokens` avoids those interactive branches while still
+        // ensuring the package and config file are available for the real import flow below.
+        runCommand(
+            title = "Installing the Eloquent driver",
+            args = listOf(
+                php,
+                "please",
+                "install:eloquent-driver",
+                "--repositories=tokens",
+                "--without-messages",
+                "--no-interaction",
+            ),
+            envOverrides = envOverrides,
+        )
+        audit.info("Ran install:eloquent-driver --repositories=tokens")
+    }
+
+    private fun publishEloquentDriverMigrations(
+        php: String,
+        envOverrides: Map<String, String>,
+        audit: ConversionAudit,
+    ) {
+        runCommand(
+            title = "Publishing the Eloquent driver migrations",
+            args = listOf(
+                php,
+                "artisan",
+                "vendor:publish",
+                "--provider=Statamic\\Eloquent\\ServiceProvider",
+                "--tag=migrations",
+                "--force",
+                "--no-interaction",
+            ),
+            envOverrides = envOverrides,
+        )
+        runCommand(
+            title = "Publishing the Eloquent entries migration",
+            args = listOf(
+                php,
+                "artisan",
+                "vendor:publish",
+                "--provider=Statamic\\Eloquent\\ServiceProvider",
+                "--tag=statamic-eloquent-entries-table-with-string-ids",
+                "--force",
+                "--no-interaction",
+            ),
+            envOverrides = envOverrides,
+        )
+        audit.info("Published the Eloquent driver migrations")
+    }
+
     private fun runFlatFileConversion(
         audit: ConversionAudit,
         progress: (StorageConversionPhase, Int, String, String) -> Unit,
@@ -924,11 +989,20 @@ internal class StorageConversionEngine(
             throw StorageConversionValidationException("No `eloquent:export-*` commands are available in this project.")
         }
 
-        progress(StorageConversionPhase.MIGRATING, 40, "Checking for orphaned entries", "")
+        progress(StorageConversionPhase.MIGRATING, 40, "Clearing the Statamic stache", "")
+        clearStache(
+            envOverrides = emptyMap(),
+            audit = audit,
+            allowFailure = false,
+            title = "Clearing the Statamic stache before export",
+            successAuditMessage = "Cleared the Statamic stache before export",
+        )
+
+        progress(StorageConversionPhase.MIGRATING, 44, "Checking for orphaned entries", "")
         cleanOrphanedEntries(audit)
 
-        val progressStart = 42
-        val span = 32
+        val progressStart = 46
+        val span = 28
         exportCommands.forEachIndexed { index, command ->
             val percent = progressStart + ((index + 1) * span / exportCommands.size)
             progress(
@@ -988,21 +1062,54 @@ internal class StorageConversionEngine(
         )
     }
 
+    private fun rewriteGitIgnore(
+        target: StorageConversionTarget,
+        audit: ConversionAudit,
+    ) {
+        val gitIgnoreFile = basePath.resolve(".gitignore")
+        val content = if (gitIgnoreFile.exists()) {
+            gitIgnoreFile.readLines().joinToString("\n")
+        } else {
+            ""
+        }
+        val next = rewriteGitIgnoreContent(content, target)
+        if (next == content) return
+        gitIgnoreFile.writeText(next)
+        audit.info("Updated .gitignore for ${target.displayName} storage")
+    }
+
     private fun clearStache(
         envOverrides: Map<String, String>,
         audit: ConversionAudit,
+        allowFailure: Boolean = true,
+        title: String = "Clearing the Statamic stache",
+        successAuditMessage: String = "Cleared the Statamic stache",
     ) {
-        val php = phpPath ?: return
-        try {
-            runCommand(
-                title = "Clearing the Statamic stache",
-                args = listOf(php, "please", "stache:clear", "--no-interaction"),
-                envOverrides = envOverrides,
-            )
-            audit.info("Cleared the Statamic stache")
-        } catch (t: Throwable) {
-            audit.warn("Unable to clear the Statamic stache automatically: ${t.message.orEmpty().trim()}")
+        val php = phpPath ?: run {
+            if (allowFailure) return
+            throw StorageConversionValidationException("PHP could not be found.")
         }
+
+        if (allowFailure) {
+            try {
+                runCommand(
+                    title = title,
+                    args = listOf(php, "please", "stache:clear", "--no-interaction"),
+                    envOverrides = envOverrides,
+                )
+                audit.info(successAuditMessage)
+            } catch (t: Throwable) {
+                audit.warn("Unable to clear the Statamic stache automatically: ${t.message.orEmpty().trim()}")
+            }
+            return
+        }
+
+        runCommand(
+            title = title,
+            args = listOf(php, "please", "stache:clear", "--no-interaction"),
+            envOverrides = envOverrides,
+        )
+        audit.info(successAuditMessage)
     }
 
     private fun acquireLock(): AutoCloseable {
@@ -1759,16 +1866,19 @@ internal fun extractCommandError(output: String): String {
         return "The command exited with an error."
     }
 
-    val errorMarker = lines.indexOfFirst { it.equals("Error", ignoreCase = true) }
-    if (errorMarker >= 0) {
-        lines.drop(errorMarker + 1)
-            .firstOrNull(::isActionableErrorLine)
-            ?.let { return it.take(220) }
+    fun summarize(candidates: List<String>): String? {
+        return candidates.firstOrNull(::isActionableErrorLine)?.take(220)
+            ?: candidates.firstOrNull { !it.equals("Error", ignoreCase = true) }?.take(220)
     }
 
-    lines.firstOrNull(::isActionableErrorLine)?.let { return it.take(220) }
+    val errorMarker = lines.indexOfFirst { it.equals("Error", ignoreCase = true) }
+    if (errorMarker >= 0) {
+        summarize(lines.drop(errorMarker + 1))?.let { return it }
+    }
 
-    return lines.lastOrNull { !isNoiseLine(it) }
+    summarize(lines)?.let { return it }
+
+    return lines.lastOrNull { !it.equals("Error", ignoreCase = true) }
         ?.take(220)
         ?: "The command exited with an error."
 }
@@ -1778,8 +1888,56 @@ internal fun suggestCommandErrorHint(output: String): String? {
     return when {
         "entryclass() on null" in normalized ->
             "Statamic could not resolve a collection for at least one exported entry. Check for orphaned entries or missing collection handles in the source project, then retry."
+        "incomplete object" in normalized && "statamic\\eloquent\\collections\\collection" in normalized ->
+            "Statamic hit a stale cached Eloquent collection while exporting to flat files. Clear the Stache cache before exporting collections, then retry."
         else -> null
     }
+}
+
+internal fun rewriteGitIgnoreContent(
+    content: String,
+    target: StorageConversionTarget,
+): String {
+    val newline = if (content.contains("\r\n")) "\r\n" else "\n"
+    val normalized = content.replace("\r\n", "\n")
+    val withoutManagedBlock = removeManagedGitIgnoreBlock(normalized).trimEnd()
+    val managedBlock = buildGitIgnoreBlock(target)
+    val next = buildString {
+        if (withoutManagedBlock.isNotBlank()) {
+            append(withoutManagedBlock)
+            append("\n\n")
+        }
+        append(managedBlock)
+        append("\n")
+    }
+    return if (newline == "\n") next else next.replace("\n", newline)
+}
+
+private fun removeManagedGitIgnoreBlock(content: String): String {
+    val result = mutableListOf<String>()
+    var skipping = false
+
+    content.lines().forEach { line ->
+        when {
+            line == GITIGNORE_MANAGED_BLOCK_START -> skipping = true
+            line == GITIGNORE_MANAGED_BLOCK_END -> skipping = false
+            !skipping -> result += line
+        }
+    }
+
+    return result.joinToString("\n")
+}
+
+private fun buildGitIgnoreBlock(target: StorageConversionTarget): String {
+    return buildList {
+        add(GITIGNORE_MANAGED_BLOCK_START)
+        add("/storage/statamic-toolkit/")
+        if (target == StorageConversionTarget.DATABASE) {
+            add("# Ignore generated flat-file Statamic content while Eloquent is active.")
+            addAll(DATABASE_STORAGE_GITIGNORE_RULES)
+        }
+        add(GITIGNORE_MANAGED_BLOCK_END)
+    }.joinToString("\n")
 }
 
 private fun normalizeCommandOutput(output: String): List<String> {
@@ -1813,6 +1971,7 @@ private fun isProgressLine(line: String): Boolean {
 }
 
 private fun isActionableErrorLine(line: String): Boolean {
+    if (line.equals("Error", ignoreCase = true)) return false
     if (line.startsWith("at ")) return false
     if (line.matches(Regex("""^\+?\d+\s+vendor frames.*$"""))) return false
     if (line.matches(Regex("""^\d+\s+please:\d+.*$"""))) return false
@@ -1823,6 +1982,8 @@ private fun isActionableErrorLine(line: String): Boolean {
         lowercase.contains("failed") ||
         lowercase.contains("unable") ||
         lowercase.contains("cannot") ||
+        lowercase.contains("incomplete object") ||
+        lowercase.contains("tried to call") ||
         lowercase.contains("call to ") ||
         lowercase.contains("undefined") ||
         lowercase.contains("not found")
@@ -1976,9 +2137,12 @@ private val IDENTIFIER_SEPARATOR = "\u001F"
 
 private const val MINIMUM_CONVERSION_HEADROOM_BYTES = 50L * 1024L * 1024L
 private const val MINIMUM_DATABASE_HEADROOM_BYTES = 25L * 1024L * 1024L
+private const val GITIGNORE_MANAGED_BLOCK_START = "# Antlers Support storage conversion"
+private const val GITIGNORE_MANAGED_BLOCK_END = "# End Antlers Support storage conversion"
 
 private val FILES_TO_RESTORE = listOf(
     ".env",
+    ".gitignore",
     "config/statamic/eloquent-driver.php",
 )
 
@@ -1997,6 +2161,25 @@ private val FLAT_FILE_BACKUP_ROOTS = listOf(
     "storage/forms",
     "storage/form-submissions",
     "storage/statamic/revisions",
+)
+
+private val DATABASE_STORAGE_GITIGNORE_RULES = listOf(
+    "/content/addons/",
+    "/content/assets/",
+    "/content/collections/",
+    "/content/globals/",
+    "/content/navigation/",
+    "/content/taxonomies/",
+    "/content/trees/",
+    "/resources/blueprints/",
+    "/resources/fieldsets/",
+    "/resources/forms/",
+    "/resources/sites/",
+    "/resources/sites.yaml",
+    "/resources/sites.yml",
+    "/storage/forms/",
+    "/storage/form-submissions/",
+    "/storage/statamic/revisions/",
 )
 
 private val REQUIRED_EXPORT_COMMANDS = listOf(

@@ -9,17 +9,25 @@ import com.antlers.support.statamic.StatamicStorageConversionService
 import com.antlers.support.statamic.displayName
 import com.antlers.support.statamic.DatabaseConnectionConfig
 import com.antlers.support.statamic.formatStorageSize
+import com.antlers.support.ui.WrapLayout
+import com.intellij.ide.projectView.ProjectView
+import com.intellij.ide.projectView.impl.ProjectViewPane
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.SearchableConfigurable
-import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.openapi.vfs.LocalFileSystem
 import java.io.File
+import java.awt.BorderLayout
 import javax.swing.JLabel
 import javax.swing.JPasswordField
 import javax.swing.JTextField
+import javax.swing.JComboBox
 import com.intellij.ui.TitledSeparator
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBCheckBox
@@ -27,14 +35,15 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import java.awt.Component
+import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
-import javax.swing.Timer
 import javax.swing.UIManager
 
 // ---------------------------------------------------------------------------
@@ -120,11 +129,9 @@ class DataSourceConfigurable : Configurable {
     private var driverValue: JBLabel? = null
     private var statusValue: JBLabel? = null
     private var locationsWrapper: JPanel? = null
-    private var locationsHeaderRow: JPanel? = null
-    private var locationsToggle: JBLabel? = null
     private var locationsSummary: JBLabel? = null
+    private var locationsDetails: JBLabel? = null
     private var locationsList: JPanel? = null
-    private var locationsExpanded = false
     private var sizeValue: JBLabel? = null
     private var recordsValue: JBLabel? = null
     private var resourcesPanel: JPanel? = null
@@ -132,7 +139,10 @@ class DataSourceConfigurable : Configurable {
     private var refreshButton: JButton? = null
     private var convertToDbButton: JButton? = null
     private var convertToFileButton: JButton? = null
-    private var statusTimer: Timer? = null
+    private var collectionsService: StatamicProjectCollections? = null
+    private var collectionsChangeListener: Runnable? = null
+    @Volatile private var storageOverviewRefreshInFlight = false
+    @Volatile private var storageOverviewRefreshRequested = false
 
     override fun getDisplayName(): String = "Data Source"
 
@@ -152,36 +162,29 @@ class DataSourceConfigurable : Configurable {
             foreground = dim
         }
         locationsSummary = JBLabel("—").apply {
-            font = detailFont
+            font = baseFont.deriveFont(Font.BOLD)
             foreground = dim
         }
-        locationsToggle = JBLabel(COLLAPSED_GLYPH).apply {
+        locationsDetails = JBLabel(" ").apply {
             font = detailFont
             foreground = dim
             isVisible = false
-            border = JBUI.Borders.emptyRight(4)
-        }
-        locationsHeaderRow = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-            isOpaque = false
-            alignmentX = Component.LEFT_ALIGNMENT
-            add(locationsToggle)
-            add(locationsSummary)
         }
         locationsList = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             alignmentX = Component.LEFT_ALIGNMENT
             isOpaque = false
+            border = JBUI.Borders.emptyTop(8)
             isVisible = false
-            border = JBUI.Borders.empty(4, 14, 0, 0)
         }
         locationsWrapper = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
-            add(locationsHeaderRow)
+            add(locationsSummary)
+            add(locationsDetails)
             add(locationsList)
         }
-        installHeaderToggleBehavior()
         sizeValue = JBLabel("—").apply {
             font = detailFont
             foreground = dim
@@ -233,8 +236,8 @@ class DataSourceConfigurable : Configurable {
             .addComponentFillVertically(JPanel(), 0)
             .panel
 
+        connectCollectionsUpdates()
         updateStatus()
-        statusTimer = Timer(1000) { updateStatus() }.apply { start() }
 
         return panel!!.apply { border = JBUI.Borders.empty() }
     }
@@ -267,9 +270,6 @@ class DataSourceConfigurable : Configurable {
         rebuildEntryFieldsPanel(idx)
         updateStorageOverview(conversionService)
 
-        if (service.status == IndexingStatus.READY || service.status == IndexingStatus.ERROR) {
-            statusTimer?.stop()
-        }
         refreshButton?.isEnabled = service.status != IndexingStatus.INDEXING
 
         // Show only the relevant convert button
@@ -285,8 +285,7 @@ class DataSourceConfigurable : Configurable {
             projectDir?.refresh(true, true)
         }
         StatamicProjectCollections.getInstance(project).refresh()
-        statusTimer?.stop()
-        statusTimer = Timer(500) { updateStatus() }.apply { start() }
+        updateStatus()
     }
 
     private fun setConvertButtonsEnabled(enabled: Boolean) {
@@ -295,7 +294,27 @@ class DataSourceConfigurable : Configurable {
     }
 
     private fun updateStorageOverview(conversionService: StatamicStorageConversionService) {
-        val snapshot = conversionService.currentStorageOverview()
+        storageOverviewRefreshRequested = true
+        if (storageOverviewRefreshInFlight) return
+
+        val project = currentProject() ?: return
+        storageOverviewRefreshInFlight = true
+        storageOverviewRefreshRequested = false
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val snapshot = conversionService.currentStorageOverview()
+            ApplicationManager.getApplication().invokeLater({
+                storageOverviewRefreshInFlight = false
+                if (project.isDisposed || panel == null) return@invokeLater
+                applyStorageOverview(snapshot)
+                if (storageOverviewRefreshRequested) {
+                    updateStorageOverview(conversionService)
+                }
+            }, ModalityState.any())
+        }
+    }
+
+    private fun applyStorageOverview(snapshot: com.antlers.support.statamic.StorageSnapshot?) {
         updateLocationsDisplay(snapshot?.locationDescription)
         sizeValue?.text = snapshot?.sizeBytes?.let(::formatStorageSize) ?: "—"
         recordsValue?.text = snapshot?.totalRecords?.toString() ?: "—"
@@ -303,15 +322,16 @@ class DataSourceConfigurable : Configurable {
 
     private fun updateLocationsDisplay(raw: String?) {
         val summary = locationsSummary ?: return
-        val toggle = locationsToggle ?: return
+        val details = locationsDetails ?: return
         val list = locationsList ?: return
-        val header = locationsHeaderRow ?: return
 
         val entries = raw
             ?.split(',')
             ?.map { it.trim() }
             ?.filter { it.isNotEmpty() }
             .orEmpty()
+        val projectRelativeEntries = entries.filter(::isProjectRelativeLocation)
+        val groupedEntries = groupLocationEntries(projectRelativeEntries)
 
         list.removeAll()
 
@@ -322,28 +342,31 @@ class DataSourceConfigurable : Configurable {
             entries.isEmpty() -> {
                 summary.text = "—"
                 summary.foreground = dim
-                toggle.isVisible = false
+                details.isVisible = false
                 list.isVisible = false
-                header.cursor = java.awt.Cursor.getDefaultCursor()
             }
-            entries.size == 1 -> {
-                summary.text = entries[0]
-                summary.foreground = dim
-                toggle.isVisible = false
-                list.isVisible = false
-                header.cursor = java.awt.Cursor.getDefaultCursor()
+            projectRelativeEntries.size == entries.size -> {
+                summary.text = if (entries.size == 1) {
+                    "1 folder"
+                } else {
+                    "${entries.size} folders across ${groupedEntries.size} roots"
+                }
+                summary.foreground = bright
+                details.text = "Click a location to reveal it in the Project tool window. Missing folders stay dim."
+                details.isVisible = true
+                groupedEntries.forEachIndexed { index, (root, groupedPaths) ->
+                    list.add(createLocationGroup(root, groupedPaths))
+                    if (index != groupedEntries.lastIndex) {
+                        list.add(Box.createVerticalStrut(JBUI.scale(10)))
+                    }
+                }
+                list.isVisible = true
             }
             else -> {
-                summary.text = "${entries.size} paths"
+                summary.text = entries.joinToString(", ")
                 summary.foreground = bright
-                toggle.isVisible = true
-                toggle.text = if (locationsExpanded) EXPANDED_GLYPH else COLLAPSED_GLYPH
-                toggle.foreground = bright
-                header.cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-                entries.forEach { entry ->
-                    list.add(createPathLabel(entry))
-                }
-                list.isVisible = locationsExpanded
+                details.isVisible = false
+                list.isVisible = false
             }
         }
 
@@ -351,56 +374,92 @@ class DataSourceConfigurable : Configurable {
         locationsWrapper?.repaint()
     }
 
-    private fun createPathLabel(path: String): JComponent {
+    private fun createLocationGroup(root: String, entries: List<String>): JComponent {
+        val bright = JBUI.CurrentTheme.Label.foreground()
+        val dim = JBUI.CurrentTheme.Label.disabledForeground()
+        val baseFont = UIManager.getFont("Label.font")
+        val headerFont = baseFont.deriveFont(Font.BOLD, baseFont.size2D - 0.5f)
+        val detailFont = baseFont.deriveFont(baseFont.size2D - 1f)
+
+        return JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+
+            add(JPanel(BorderLayout()).apply {
+                isOpaque = false
+                alignmentX = Component.LEFT_ALIGNMENT
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+                add(JBLabel("$root/").apply {
+                    font = headerFont
+                    foreground = bright
+                }, BorderLayout.WEST)
+                add(JBLabel("${entries.size} folder${if (entries.size == 1) "" else "s"}").apply {
+                    font = detailFont
+                    foreground = dim
+                }, BorderLayout.EAST)
+            })
+            add(Box.createVerticalStrut(JBUI.scale(6)))
+            add(createLocationRow(root, entries))
+        }
+    }
+
+    private fun createLocationRow(root: String, entries: List<String>): JComponent {
+        return object : JPanel(WrapLayout(JBUI.scale(6), JBUI.scale(6))) {
+            override fun getPreferredSize(): Dimension {
+                val maxWidth = parent?.width?.takeIf { it > 0 } ?: JBUI.scale(420)
+                val base = super.getPreferredSize()
+                if (base.width <= maxWidth) return base
+
+                val previous = size
+                size = Dimension(maxWidth, previous.height)
+                val wrapped = super.getPreferredSize()
+                size = previous
+                return Dimension(maxWidth, wrapped.height)
+            }
+        }.apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            entries.forEach { entry ->
+                add(createLocationChip(root, entry))
+            }
+        }
+    }
+
+    private fun createLocationChip(root: String, path: String): JComponent {
+        val dim = JBUI.CurrentTheme.Label.disabledForeground()
+        val borderColor = JBUI.CurrentTheme.Link.Foreground.ENABLED
         val baseFont = UIManager.getFont("Label.font")
         val detailFont = baseFont.deriveFont(baseFont.size2D - 1f)
-        val dim = JBUI.CurrentTheme.Label.disabledForeground()
-        val link = JBUI.CurrentTheme.Link.Foreground.ENABLED
+        val label = path.removePrefix("$root/").ifEmpty { path }
+        val project = currentProject()
+        val target = project?.let { findProjectRelativeDirectory(it, path) }
 
-        return JBLabel(path).apply {
-            font = detailFont
-            foreground = dim
-            alignmentX = Component.LEFT_ALIGNMENT
-            border = JBUI.Borders.emptyTop(2)
-            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-            toolTipText = "Click to copy '$path'"
-            addMouseListener(object : java.awt.event.MouseAdapter() {
-                override fun mouseEntered(e: java.awt.event.MouseEvent) {
-                    foreground = link
-                }
-                override fun mouseExited(e: java.awt.event.MouseEvent) {
-                    foreground = dim
-                }
-                override fun mouseClicked(e: java.awt.event.MouseEvent) {
-                    val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                    clipboard.setContents(java.awt.datatransfer.StringSelection(path), null)
-                    foreground = link
-                    javax.swing.Timer(600) { foreground = dim }.apply { isRepeats = false; start() }
-                }
-            })
-        }
-    }
-
-    private fun installHeaderToggleBehavior() {
-        val header = locationsHeaderRow ?: return
-        val listener = object : java.awt.event.MouseAdapter() {
-            override fun mouseClicked(e: java.awt.event.MouseEvent) {
-                if (locationsToggle?.isVisible == true) {
-                    toggleLocationsExpanded()
-                }
+        val content = if (project != null && target != null) {
+            ActionLink(label) {
+                openProjectRelativeDirectory(project, path)
+            }.apply {
+                font = detailFont
+                toolTipText = "Reveal '$path' in the Project tool window"
+            }
+        } else {
+            JBLabel(label).apply {
+                font = detailFont
+                foreground = dim
+                toolTipText = "'$path' is part of the storage layout but is not present in the project yet"
             }
         }
-        header.addMouseListener(listener)
-        locationsToggle?.addMouseListener(listener)
-        locationsSummary?.addMouseListener(listener)
-    }
 
-    private fun toggleLocationsExpanded() {
-        locationsExpanded = !locationsExpanded
-        locationsToggle?.text = if (locationsExpanded) EXPANDED_GLYPH else COLLAPSED_GLYPH
-        locationsList?.isVisible = locationsExpanded
-        locationsWrapper?.revalidate()
-        locationsWrapper?.repaint()
+        return JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(if (target != null) borderColor else dim, 1, true),
+                JBUI.Borders.empty(4, 8)
+            )
+            alignmentY = Component.CENTER_ALIGNMENT
+            toolTipText = content.toolTipText
+            add(content, BorderLayout.CENTER)
+        }
     }
 
     private fun runExportToFlatFile() {
@@ -430,7 +489,7 @@ class DataSourceConfigurable : Configurable {
         startConversion(
             target = StorageConversionTarget.DATABASE,
             databaseConfig = DatabaseConnectionConfig(
-                connection = dialog.connectionField.text.trim(),
+                connection = dialog.selectedConnection(),
                 host = dialog.hostField.text.trim(),
                 port = dialog.portField.text.trim(),
                 database = dialog.databaseField.text.trim(),
@@ -496,6 +555,57 @@ class DataSourceConfigurable : Configurable {
 
     private fun currentProject(): Project? = ProjectManager.getInstance().openProjects.firstOrNull()
 
+    private fun connectCollectionsUpdates() {
+        disconnectCollectionsUpdates()
+
+        val project = currentProject() ?: return
+        val service = StatamicProjectCollections.getInstance(project)
+        val listener = Runnable { updateStatus() }
+
+        service.addChangeListener(listener)
+        collectionsService = service
+        collectionsChangeListener = listener
+    }
+
+    private fun disconnectCollectionsUpdates() {
+        val service = collectionsService
+        val listener = collectionsChangeListener
+        if (service != null && listener != null) {
+            service.removeChangeListener(listener)
+        }
+        collectionsService = null
+        collectionsChangeListener = null
+    }
+
+    private fun isProjectRelativeLocation(location: String): Boolean {
+        return location.contains('/') && !location.startsWith('/') && !location.contains("://") && !location.startsWith("sqlite:")
+    }
+
+    private fun groupLocationEntries(entries: List<String>): List<Pair<String, List<String>>> {
+        val groups = linkedMapOf<String, MutableList<String>>()
+        entries.forEach { entry ->
+            val root = entry.substringBefore('/')
+            groups.getOrPut(root) { mutableListOf() }.add(entry)
+        }
+        return groups.entries.map { (root, paths) -> root to paths.toList() }
+    }
+
+    private fun findProjectRelativeDirectory(project: Project, relativePath: String) =
+        project.basePath
+            ?.let { "$it/$relativePath" }
+            ?.let(LocalFileSystem.getInstance()::findFileByPath)
+
+    private fun openProjectRelativeDirectory(project: Project, relativePath: String) {
+        val target = project.basePath
+            ?.let { "$it/$relativePath" }
+            ?.let(LocalFileSystem.getInstance()::refreshAndFindFileByPath)
+            ?: return
+
+        val projectView = ProjectView.getInstance(project)
+        projectView.changeView(ProjectViewPane.ID)
+        projectView.select(null, target, false)
+    }
+
     private fun parseEnvFile(envFile: File): Map<String, String> {
         if (!envFile.exists()) return emptyMap()
         return envFile.readLines()
@@ -507,7 +617,12 @@ class DataSourceConfigurable : Configurable {
             }
     }
 
-    override fun disposeUIResources() { statusTimer?.stop(); statusTimer = null; panel = null }
+    override fun disposeUIResources() {
+        disconnectCollectionsUpdates()
+        storageOverviewRefreshInFlight = false
+        storageOverviewRefreshRequested = false
+        panel = null
+    }
     override fun isModified(): Boolean = false
     override fun apply() {}
 
@@ -637,11 +752,6 @@ class DataSourceConfigurable : Configurable {
             .addLabeledComponent(JBLabel("Tracked records:"), recordsValue!!.apply { border = indent })
             .panel
     }
-
-    private companion object {
-        private const val COLLAPSED_GLYPH = "▸"
-        private const val EXPANDED_GLYPH = "▾"
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -657,7 +767,20 @@ private class DatabaseConfigDialog(
     dbPassword: String,
 ) : DialogWrapper(true) {
 
-    val connectionField = JTextField(dbConnection, 20)
+    private val connectionChoices = linkedSetOf("mysql", "sqlite").apply {
+        if (dbConnection.isNotBlank()) add(dbConnection)
+    }.toTypedArray()
+    private val connectionField = JComboBox(connectionChoices).apply {
+        selectedItem = dbConnection.ifBlank { "mysql" }
+    }
+    private val databaseLabel = JLabel("Database:")
+    private val databaseHint = JBLabel().apply {
+        foreground = UIManager.getColor("Label.infoForeground") ?: UIManager.getColor("Label.disabledForeground")
+    }
+    private val hostRowLabel = JLabel("Host:")
+    private val portRowLabel = JLabel("Port:")
+    private val usernameRowLabel = JLabel("Username:")
+    private val passwordRowLabel = JLabel("Password:")
     val hostField = JTextField(dbHost, 20)
     val portField = JTextField(dbPort, 20)
     val databaseField = JTextField(dbDatabase, 20)
@@ -667,21 +790,72 @@ private class DatabaseConfigDialog(
     init {
         title = "Configure Database Connection"
         setOKButtonText("Convert")
+        connectionField.addActionListener { updateConnectionMode() }
         init()
+        updateConnectionMode()
     }
 
     override fun createCenterPanel(): JComponent {
         return FormBuilder.createFormBuilder()
             .addLabeledComponent(JLabel("Connection:"), connectionField)
-            .addLabeledComponent(JLabel("Host:"), hostField)
-            .addLabeledComponent(JLabel("Port:"), portField)
-            .addLabeledComponent(JLabel("Database:"), databaseField)
-            .addLabeledComponent(JLabel("Username:"), usernameField)
-            .addLabeledComponent(JLabel("Password:"), passwordField)
+            .addComponentToRightColumn(databaseHint)
+            .addLabeledComponent(hostRowLabel, hostField)
+            .addLabeledComponent(portRowLabel, portField)
+            .addLabeledComponent(databaseLabel, databaseField)
+            .addLabeledComponent(usernameRowLabel, usernameField)
+            .addLabeledComponent(passwordRowLabel, passwordField)
             .panel
     }
 
-    override fun getPreferredFocusedComponent(): JComponent = databaseField
+    override fun getPreferredFocusedComponent(): JComponent =
+        if (selectedConnection() == "sqlite") databaseField else hostField
+
+    override fun doValidate(): ValidationInfo? {
+        if (databaseField.text.trim().isEmpty()) {
+            val message = if (selectedConnection() == "sqlite") {
+                "Enter the SQLite database file path."
+            } else {
+                "Enter the database name."
+            }
+            return ValidationInfo(message, databaseField)
+        }
+
+        if (selectedConnection() != "sqlite") {
+            if (hostField.text.trim().isEmpty()) {
+                return ValidationInfo("Enter the database host.", hostField)
+            }
+            if (portField.text.trim().isEmpty()) {
+                return ValidationInfo("Enter the database port.", portField)
+            }
+            if (usernameField.text.trim().isEmpty()) {
+                return ValidationInfo("Enter the database username.", usernameField)
+            }
+        }
+
+        return null
+    }
+
+    fun selectedConnection(): String =
+        (connectionField.selectedItem as? String)?.trim().orEmpty().ifBlank { "mysql" }
+
+    private fun updateConnectionMode() {
+        val sqlite = selectedConnection() == "sqlite"
+        databaseLabel.text = if (sqlite) "Database File:" else "Database:"
+        databaseHint.text = if (sqlite) {
+            "Use an absolute or project-relative SQLite path."
+        } else {
+            "MySQL uses host, port, database, username, and password."
+        }
+        setRowVisible(hostRowLabel, hostField, !sqlite)
+        setRowVisible(portRowLabel, portField, !sqlite)
+        setRowVisible(usernameRowLabel, usernameField, !sqlite)
+        setRowVisible(passwordRowLabel, passwordField, !sqlite)
+    }
+
+    private fun setRowVisible(label: JLabel, field: JComponent, visible: Boolean) {
+        label.isVisible = visible
+        field.isVisible = visible
+    }
 }
 
 private data class SettingSection(
